@@ -67,6 +67,79 @@ function isLocal(url: string): boolean {
   }
 }
 
+/**
+ * Explain a failed connection in terms of what is actually likely to be wrong.
+ *
+ * PostgreSQL deliberately returns the SAME "password authentication failed"
+ * message whether the password is wrong or the role does not exist at all — it
+ * will not confirm which, because that would let an attacker enumerate valid
+ * usernames. That is correct of PostgreSQL and unhelpful here, so this spells
+ * out the two causes that actually produce it during local setup.
+ */
+function reportConnectionFailure(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: string }).code;
+  const redacted = ADMIN_URL.replace(/:[^:@]*@/, ':***@');
+
+  let host = 'localhost';
+  let port = '5432';
+  let user = 'postgres';
+  try {
+    const url = new URL(ADMIN_URL);
+    host = url.hostname || host;
+    port = url.port || port;
+    user = decodeURIComponent(url.username) || user;
+  } catch {
+    // Keep the defaults; the URL itself is reported below either way.
+  }
+
+  log(`\nCould not connect to PostgreSQL at ${redacted}\n`);
+  log(`  ${message}\n`);
+
+  const authFailed = /password authentication failed|role .* does not exist/i.test(message);
+  const refused = code === 'ECONNREFUSED' || /ECONNREFUSED/i.test(message);
+
+  if (refused) {
+    log(`Nothing is listening on ${host}:${port}.\n`);
+    log('  • start the bundled server:');
+    log('      docker compose -f infra/docker-compose.yml up -d postgres');
+    log('  • or point DATABASE_ADMIN_URL in .env at your own server\n');
+    return;
+  }
+
+  if (authFailed) {
+    log(`Something IS listening on ${host}:${port}, but it rejected the credentials.`);
+    log('PostgreSQL returns this same message whether the password is wrong or the');
+    log(`role "${user}" does not exist, so both are worth checking.\n`);
+
+    log('  1. A container created by an EARLIER version of the compose file.');
+    log('     POSTGRES_USER is read only when the data volume is first');
+    log('     initialised, so changing it later has no effect until the volume');
+    log('     is removed. This is the usual cause after pulling an update:\n');
+    log('       docker compose -f infra/docker-compose.yml down -v');
+    log('       docker compose -f infra/docker-compose.yml up -d\n');
+    log('     To see which superuser the running container actually has:');
+    log('       docker exec hims-postgres psql -U postgres -c "\\du"\n');
+
+    log(`  2. A different PostgreSQL already on port ${port}.`);
+    log('     Common on Windows and macOS, where the installer registers a');
+    log('     service that starts at boot and takes the port before Docker.\n');
+    log('       Windows:  netstat -ano | findstr :' + port);
+    log('       macOS:    lsof -nP -iTCP:' + port + ' -sTCP:LISTEN');
+    log('       Linux:    ss -lptn "sport = :' + port + '"\n');
+    log('     Either point DATABASE_ADMIN_URL at that server with its own');
+    log('     password, or move the container aside:\n');
+    log('       POSTGRES_PORT=5433 docker compose -f infra/docker-compose.yml up -d');
+    log('       # then set DATABASE_ADMIN_URL / DATABASE_URL / DATABASE_MIGRATION_URL');
+    log('       # in .env to use :5433\n');
+    return;
+  }
+
+  log('Check that PostgreSQL is running, then either:');
+  log('  • start the bundled one:  docker compose -f infra/docker-compose.yml up -d postgres');
+  log('  • or point this at yours: set DATABASE_ADMIN_URL in .env\n');
+}
+
 async function main(): Promise<void> {
   const drop = process.argv.includes('--drop');
 
@@ -80,12 +153,7 @@ async function main(): Promise<void> {
   try {
     await client.connect();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log(`\nCould not connect to PostgreSQL at ${ADMIN_URL.replace(/:[^:@]*@/, ':***@')}\n`);
-    log(`  ${message}\n`);
-    log('Check that PostgreSQL is running, then either:');
-    log('  • start the bundled one:  docker compose -f infra/docker-compose.yml up -d postgres');
-    log('  • or point this at yours: set DATABASE_ADMIN_URL in .env\n');
+    reportConnectionFailure(error);
     process.exit(1);
   }
 

@@ -85,6 +85,61 @@ The container's `POSTGRES_USER` stays `postgres` for exactly this reason. Making
 it `hims_owner` would make the schema owner a superuser, and the privilege
 separation would look correct while being inert.
 
+### Troubleshooting
+
+**`password authentication failed for user "postgres"`**
+
+Something is listening on 5432 but rejecting the credentials. PostgreSQL
+returns this same message whether the password is wrong *or* the role does not
+exist, so there are two candidates — `pnpm db:create` prints both, with the
+commands to check each.
+
+1. **A container from an earlier version of this compose file.** `POSTGRES_USER`
+   is read only when the data volume is first initialised, so changing it later
+   does nothing until the volume is gone. After pulling an update:
+
+   ```bash
+   docker compose -f infra/docker-compose.yml down -v
+   docker compose -f infra/docker-compose.yml up -d
+   ```
+
+   To see which superuser the running container actually has:
+
+   ```bash
+   docker exec hims-postgres psql -U postgres -c "\du"
+   ```
+
+   Do **not** work around this by pointing `DATABASE_ADMIN_URL` at the old
+   `hims_owner` superuser. That makes the schema owner a superuser, which
+   bypasses row-level security entirely — the isolation guarantees would be
+   inert while appearing to hold.
+
+2. **A locally installed PostgreSQL already on 5432.** Common on Windows and
+   macOS, where the installer registers a service that starts at boot.
+
+   ```powershell
+   netstat -ano | findstr :5432      # Windows
+   ```
+   ```bash
+   lsof -nP -iTCP:5432 -sTCP:LISTEN  # macOS
+   ss -lptn "sport = :5432"          # Linux
+   ```
+
+   Either point `DATABASE_ADMIN_URL` at that server with its own password, or
+   move the bundled one aside:
+
+   ```bash
+   POSTGRES_PORT=5433 docker compose -f infra/docker-compose.yml up -d
+   ```
+
+   then set `:5433` in `DATABASE_ADMIN_URL`, `DATABASE_URL` and
+   `DATABASE_MIGRATION_URL`.
+
+**The API refuses to boot.** It validates configuration on startup and exits
+rather than running unsafely — placeholder encryption keys, `MASTER_KEY` equal
+to `BLIND_INDEX_KEY`, or the two JWT secrets matching will all stop it. The
+message names the field.
+
 ### Optional services
 
 Object storage and the mail catcher are behind the `extras` profile:

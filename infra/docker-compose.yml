@@ -45,7 +45,11 @@ services:
       # Deterministic collation, so index ordering matches across machines.
       POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=und-x-icu'
     ports:
-      - '5432:5432'
+      # Overridable because a locally installed PostgreSQL often already holds
+      # 5432 — on Windows and macOS the installer registers a service that
+      # starts at boot. `POSTGRES_PORT=5433 docker compose up -d` moves this
+      # one aside; remember to match it in the DATABASE_* URLs in .env.
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -67,7 +71,7 @@ services:
     image: redis:7-alpine
     container_name: hims-redis
     ports:
-      - '6379:6379'
+      - '${REDIS_PORT:-6379}:6379'
     command: redis-server --save 60 1 --loglevel warning
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
