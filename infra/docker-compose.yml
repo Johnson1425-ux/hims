@@ -1,0 +1,87 @@
+# Local development stack.
+#
+# The database is initialised with THREE roles rather than one, because the
+# privilege separation is part of the security model and is easy to lose if
+# development runs everything as a superuser:
+#
+#   hims_owner     owns the schema; migrations connect as this
+#   hims_app       the API; no BYPASSRLS, so row-level security applies
+#   hims_platform  BYPASSRLS, for break-glass support and cross-tenant jobs
+#
+# Running the API as a superuser silently disables every RLS policy, which is
+# exactly the failure this file exists to prevent.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hims-postgres
+    environment:
+      POSTGRES_USER: hims_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev-only-password}
+      POSTGRES_DB: hims
+      # Deterministic collation, so index ordering matches across machines.
+      POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=und-x-icu'
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U hims_owner -d hims']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    command:
+      - postgres
+      # Development conveniences; tune for the real workload in production.
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - log_min_duration_statement=500
+
+  redis:
+    image: redis:7-alpine
+    container_name: hims-redis
+    ports:
+      - '6379:6379'
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # S3-compatible object storage for documents, scans and signatures.
+  minio:
+    image: minio/minio:latest
+    container_name: hims-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-hims-dev}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-hims-dev-secret}
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ':9001'
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Catches outbound mail in development, so a test reminder can never reach a
+  # real patient. The notification worker also refuses to send without an
+  # explicitly configured provider.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: hims-mailpit
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+
+volumes:
+  postgres-data:
+  minio-data:

@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Secrets. An HMS .env holds the master encryption key; it must never be committed.
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.log
+npm-debug.log*
+.pnpm-store/
+.turbo/
+.idea/
+.vscode/*
+!.vscode/extensions.json
