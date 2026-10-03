@@ -201,6 +201,32 @@ The two causes it names:
    bypasses row-level security entirely — the isolation guarantees would be
    inert while appearing to hold.
 
+**`password authentication failed for user "hims_owner"` from `pnpm db:migrate`**
+
+The database was created but the roles and the URLs disagree about the
+password. `DATABASE_DEV_PASSWORD` is what `db:create` *assigns* to the roles;
+the passwords inside `DATABASE_URL` and `DATABASE_MIGRATION_URL` are what the
+API and the migration runner *present*. Nothing keeps them equal, so one
+edited line is enough to break it — and the usual trigger is a role that
+survived in the data volume with an earlier password.
+
+Re-run `pnpm db:create`. It now resets every role it manages from
+`DATABASE_DEV_PASSWORD` on each run against a local host, rather than skipping
+roles that already exist, and it finishes by connecting as each configured URL
+and reporting what it got:
+
+```
+  verifying the credentials the application will use:
+
+  DATABASE_URL             connects as hims_app to hims
+  DATABASE_MIGRATION_URL   connects as hims_owner to hims
+```
+
+If one of those fails it exits non-zero and names the credential, so
+`db:create` can no longer report success over a setup that refuses the very
+next step. Passwords are left alone when `DATABASE_ADMIN_URL` is not local —
+resetting one on a shared server is not this command's business.
+
 **The API refuses to boot.** It validates configuration on startup and exits
 rather than running unsafely — placeholder encryption keys, `MASTER_KEY` equal
 to `BLIND_INDEX_KEY`, or the two JWT secrets matching will all stop it. The

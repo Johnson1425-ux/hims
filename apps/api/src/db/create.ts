@@ -144,6 +144,147 @@ function checkPortAgreement(): void {
   log('');
 }
 
+function userOf(url: string): string | null {
+  try {
+    return decodeURIComponent(new URL(url).username) || null;
+  } catch {
+    return null;
+  }
+}
+
+function passwordOf(url: string): string | null {
+  try {
+    return decodeURIComponent(new URL(url).password);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Warn when a DATABASE_* URL carries a different password than the one these
+ * roles are given.
+ *
+ * DATABASE_DEV_PASSWORD is the password db:create ASSIGNS; the passwords
+ * embedded in DATABASE_URL and DATABASE_MIGRATION_URL are what the API and the
+ * migration runner will PRESENT. Two copies of one secret in one file, with
+ * nothing keeping them equal, so they drift whenever one line is edited — and
+ * the result is a database that creates cleanly and then refuses every
+ * migration with `password authentication failed for user "hims_owner"`.
+ *
+ * Only for roles this command manages, and only locally: pointing a URL at
+ * some other server with its own credentials is legitimate.
+ */
+function checkPasswordAgreement(): void {
+  const managed = new Set<string>(ROLES.map((r) => r.name));
+
+  const disagree = URL_VARS.filter((name) => {
+    const url = process.env[name];
+    if (!url || !isLocal(url)) return false;
+    const user = userOf(url);
+    if (!user || !managed.has(user)) return false;
+    return passwordOf(url) !== DEV_PASSWORD;
+  });
+
+  if (disagree.length === 0) return;
+
+  log('\n  WARNING: these carry a different password than DATABASE_DEV_PASSWORD:\n');
+  for (const name of disagree) {
+    log(`    ${name.padEnd(24)} as ${userOf(process.env[name] ?? '') ?? '?'}`);
+  }
+  log('\n  DATABASE_DEV_PASSWORD is the password this command ASSIGNS to the');
+  log('  roles. The one inside each URL is what the API and the migration');
+  log('  runner will PRESENT. Nothing keeps the two equal, so a single edited');
+  log('  line produces a database that creates cleanly and then refuses every');
+  log('  migration.');
+  log('');
+  log('  Make them the same in .env — either value, as long as it is one value.');
+  log('  The roles are set from DATABASE_DEV_PASSWORD on each run, so changing');
+  log('  that and re-running `pnpm db:create` is enough.');
+  log('');
+}
+
+/**
+ * Prove the credentials the application will actually use.
+ *
+ * Creating roles and reporting success says nothing about whether the API can
+ * log in: the role may have pre-existed with another password, or a URL may
+ * carry one that no longer matches. This connects as each URL in turn, so the
+ * command either ends having demonstrated a working setup or says precisely
+ * which credential is wrong.
+ *
+ * URLs aimed at a different server than DATABASE_ADMIN_URL are skipped rather
+ * than failed: that is a deliberate configuration, not a mistake.
+ */
+async function verifyClientUrls(): Promise<boolean> {
+  const adminHost = (() => {
+    try {
+      const url = new URL(ADMIN_URL);
+      return `${url.hostname}:${url.port || '5432'}`;
+    } catch {
+      return null;
+    }
+  })();
+
+  let allGood = true;
+  const checked: string[] = [];
+
+  for (const name of URL_VARS) {
+    if (name === 'DATABASE_ADMIN_URL') continue;
+
+    const url = process.env[name];
+    if (!url) continue;
+
+    let target: string | null = null;
+    try {
+      const parsed = new URL(url);
+      target = `${parsed.hostname}:${parsed.port || '5432'}`;
+    } catch {
+      log(`  ${name} is not a valid URL — skipped`);
+      continue;
+    }
+
+    if (target !== adminHost) {
+      log(`  ${name.padEnd(24)} points at ${target} — skipped`);
+      continue;
+    }
+
+    const client = new Client({ connectionString: url, application_name: 'hims-db-create-verify' });
+
+    try {
+      await client.connect();
+      const { rows } = await client.query<{ who: string; db: string }>(
+        'SELECT current_user AS who, current_database() AS db',
+      );
+      await client.end();
+      checked.push(name);
+      log(`  ${name.padEnd(24)} connects as ${rows[0]!.who} to ${rows[0]!.db}`);
+    } catch (error) {
+      await client.end().catch(() => undefined);
+      allGood = false;
+      const code = (error as { code?: string }).code;
+      const detail = error instanceof Error ? error.message : String(error);
+      log(`  ${name.padEnd(24)} FAILED — ${detail}`);
+
+      if (code === '28P01') {
+        log('');
+        log(`       The role exists, but the password in ${name} is not the`);
+        log('       one it was given. DATABASE_DEV_PASSWORD is what this command');
+        log('       assigns; make the URL match it, then re-run `pnpm db:create`.');
+      } else if (code === '3D000') {
+        log('');
+        log('       That database does not exist. DATABASE_NAME decides which one');
+        log(`       this command creates; it made "${DB_NAME}".`);
+      }
+    }
+  }
+
+  if (allGood && checked.length === 0) {
+    log('  no client URLs to check (DATABASE_URL / DATABASE_MIGRATION_URL unset)');
+  }
+
+  return allGood;
+}
+
 async function docker(args: string[]): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('docker', args, { timeout: 15_000 });
@@ -437,6 +578,7 @@ async function main(): Promise<void> {
   // authentication error from an unrelated server rather than as a failure to
   // connect, and that is almost impossible to read backwards.
   checkPortAgreement();
+  checkPasswordAgreement();
 
   const client = new Client({ connectionString: ADMIN_URL, application_name: 'hims-db-create' });
 
@@ -481,23 +623,34 @@ async function main(): Promise<void> {
         role.name,
       ]);
 
-      if (rowCount) {
-        log(`  role ${role.name.padEnd(15)} already exists`);
+      // An existing role is brought into line rather than left alone. Skipping
+      // it is what turns a half-made setup into a stuck one: the role survives
+      // in the data volume with whatever password it was first given, this
+      // command reports success, and every later connection is refused. Local
+      // only — resetting a password on a shared server would not be ours to do.
+      const verb = rowCount ? 'ALTER' : 'CREATE';
+
+      if (rowCount && !isLocal(ADMIN_URL)) {
+        log(`  role ${role.name.padEnd(15)} already exists (password left alone: not a local host)`);
         continue;
       }
 
       try {
         await client.query(
-          `CREATE ROLE ${ident(role.name)} LOGIN PASSWORD ${literal(DEV_PASSWORD)} ${role.attrs}`,
+          `${verb} ROLE ${ident(role.name)} WITH LOGIN PASSWORD ${literal(DEV_PASSWORD)} ${role.attrs}`,
         );
-        log(`  role ${role.name.padEnd(15)} created      (${role.note})`);
+        log(
+          rowCount
+            ? `  role ${role.name.padEnd(15)} reset         (password set from DATABASE_DEV_PASSWORD)`
+            : `  role ${role.name.padEnd(15)} created       (${role.note})`,
+        );
       } catch (error) {
         const code = (error as { code?: string }).code;
 
         // BYPASSRLS needs superuser; CREATE ROLE needs CREATEROLE.
         if (code === '42501') {
           log(`  role ${role.name.padEnd(15)} SKIPPED — the connecting user lacks privilege`);
-          log(`       ask a superuser to run: CREATE ROLE ${role.name} LOGIN ${role.attrs};`);
+          log(`       ask a superuser to run: ${verb} ROLE ${role.name} LOGIN ${role.attrs};`);
           continue;
         }
         throw error;
@@ -538,6 +691,19 @@ async function main(): Promise<void> {
     }
   } finally {
     await client.end();
+  }
+
+  // Creating roles says nothing about whether the application can log in.
+  // Demonstrate it, so the command cannot report success over a setup that
+  // refuses the very next step.
+  log('\n  verifying the credentials the application will use:\n');
+  const credentialsWork = await verifyClientUrls();
+
+  if (!credentialsWork) {
+    log('\nThe database exists, but at least one configured credential does not work,');
+    log('so `pnpm db:migrate` would fail. Fix the URL above and re-run this command —');
+    log('it is idempotent, and it resets the roles from DATABASE_DEV_PASSWORD each run.\n');
+    process.exit(1);
   }
 
   log('\nNext:');
