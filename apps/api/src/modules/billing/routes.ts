@@ -8,6 +8,7 @@
  */
 import { Router } from 'express';
 import { z } from 'zod';
+import { booleanish } from '../../utils/schema.js';
 import type { NextFunction, Request, Response } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { requirePermission, requireStaffAccount } from '../../middleware/authorize.js';
@@ -71,7 +72,7 @@ const invoiceQuerySchema = z.object({
   patientId: z.string().uuid().optional(),
   status: z.string().max(40).optional(),
   billingStage: z.string().max(40).optional(),
-  overdueOnly: z.coerce.boolean().optional(),
+  overdueOnly: booleanish().optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   page: z.coerce.number().int().min(1).default(1),

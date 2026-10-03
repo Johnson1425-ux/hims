@@ -12,34 +12,44 @@
 # stopped the database from starting at all. Nothing optional should be able to
 # block the thing the application actually depends on.
 #
-# The database is initialised with THREE roles rather than one, because the
-# privilege separation is part of the security model and is easy to lose if
-# development runs everything as a superuser:
+# This file provides a BARE PostgreSQL with the stock `postgres` superuser, and
+# nothing else. The application's roles and database are created by
+# `pnpm db:create`.
 #
-#   hims_owner     owns the schema; migrations connect as this
-#   hims_app       the API; no BYPASSRLS, so row-level security applies
-#   hims_platform  BYPASSRLS, for break-glass support and cross-tenant jobs
+# That split is deliberate, for two reasons:
 #
-# Running the API as a superuser silently disables every RLS policy, which is
-# exactly the failure this file exists to prevent.
+#  1. ONE mechanism, not two. Creating roles here as well as in db:create means
+#     two definitions that drift. db:create works against this container and
+#     against a natively installed PostgreSQL identically, so it is the single
+#     source of truth.
+#
+#  2. `POSTGRES_USER` is the container's SUPERUSER. Setting it to hims_owner —
+#     as an earlier version of this file did — makes the schema owner a
+#     superuser, and a superuser bypasses row-level security entirely. The
+#     privilege separation would have looked correct while being inert, and the
+#     isolation tests would have passed against a system that leaked. The
+#     bootstrap superuser stays `postgres`; hims_owner is created as an
+#     ordinary role that owns the `hims` database and nothing more.
 
 services:
   postgres:
     image: postgres:16-alpine
     container_name: hims-postgres
     environment:
-      POSTGRES_USER: hims_owner
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev-only-password}
-      POSTGRES_DB: hims
+      # The bootstrap superuser, and only that. `pnpm db:create` connects with
+      # these credentials to create hims_owner, hims_app, hims_platform,
+      # hims_analytics and the `hims` database itself.
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
       # Deterministic collation, so index ordering matches across machines.
       POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=und-x-icu'
     ports:
       - '5432:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U hims_owner -d hims']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres}']
       interval: 5s
       timeout: 3s
       retries: 10

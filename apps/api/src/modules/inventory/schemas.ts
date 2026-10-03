@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { booleanish } from '../../utils/schema.js';
 
 export const stockStatusSchema = z.object({
   locationId: z.string().uuid().optional(),
@@ -8,7 +9,7 @@ export const stockStatusSchema = z.object({
   state: z.enum(['ok', 'low', 'critical', 'out_of_stock', 'overstocked']).optional(),
   /** Only items whose earliest batch expires within n days. */
   expiringWithinDays: z.coerce.number().int().min(1).max(730).optional(),
-  controlledOnly: z.coerce.boolean().optional(),
+  controlledOnly: booleanish().optional(),
   q: z.string().max(120).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),

@@ -31,6 +31,8 @@ The brief left these open; the choices and their reasons:
 ```bash
 # 1. PostgreSQL (and Redis). Optional services sit behind a profile, so a
 #    registry hiccup in one of them can never stop the database coming up.
+#    This gives you a bare server with the stock `postgres` superuser —
+#    the application's roles and database come from step 3.
 docker compose -f infra/docker-compose.yml up -d
 
 # 2. Configuration
@@ -70,8 +72,18 @@ from scratch (and refuses to run against anything that is not localhost).
 `hims_analytics` rather than running everything as one user. The separation is
 part of the security model, not ceremony: **an API connected as a superuser
 silently bypasses every row-level security policy in the schema**, so the
-isolation tests would pass while the running system leaked. `hims_app` holds no
-`BYPASSRLS`.
+isolation tests would pass while the running system leaked.
+
+| Role | Used by | Privileges |
+|---|---|---|
+| `hims_owner` | `pnpm db:migrate` | Owns the schema. Not a superuser — trusted extensions work because it owns the database. |
+| `hims_app` | The API at runtime | No `BYPASSRLS`. Row-level security applies to every query it makes. |
+| `hims_platform` | Break-glass support, cross-tenant jobs | `BYPASSRLS`, deliberately narrow, everything it does is audited. |
+| `hims_analytics` | BI / warehouse export | Reporting views only. |
+
+The container's `POSTGRES_USER` stays `postgres` for exactly this reason. Making
+it `hims_owner` would make the schema owner a superuser, and the privilege
+separation would look correct while being inert.
 
 ### Optional services
 
@@ -216,7 +228,7 @@ apps/
       lib/           API client, session, theme, formatters
       styles/        design tokens
 docs/                architecture, data model, API, security, plan, UI
-infra/               docker compose, database role bootstrap
+infra/               docker compose (bare PostgreSQL + Redis; extras behind a profile)
 ```
 
 ---

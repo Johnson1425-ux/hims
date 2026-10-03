@@ -7,6 +7,7 @@
  */
 import { Router } from 'express';
 import { z } from 'zod';
+import { booleanish } from '../../utils/schema.js';
 import type { NextFunction, Request, Response } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { requirePermission, requireStaffAccount } from '../../middleware/authorize.js';
@@ -49,8 +50,8 @@ const listStaffSchema = z.object({
   role: z.enum(ROLE_KEYS).optional(),
   departmentId: z.string().uuid().optional(),
   facilityId: z.string().uuid().optional(),
-  providersOnly: z.coerce.boolean().optional(),
-  includeInactive: z.coerce.boolean().default(false),
+  providersOnly: booleanish().optional(),
+  includeInactive: booleanish().default(false),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
 });

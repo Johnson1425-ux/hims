@@ -7,6 +7,7 @@
  */
 import { z } from 'zod';
 import dotenv from 'dotenv';
+import { booleanish } from '../utils/schema.js';
 
 dotenv.config();
 
@@ -44,7 +45,7 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   DATABASE_MIGRATION_URL: z.string().optional(),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().max(200).default(20),
-  DATABASE_SSL: z.coerce.boolean().default(false),
+  DATABASE_SSL: booleanish().default(false),
   DATABASE_STATEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
 
   MASTER_KEY: base64Key32,
@@ -73,7 +74,7 @@ const schema = z.object({
   S3_BUCKET: z.string().default('hims-documents'),
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
-  S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  S3_FORCE_PATH_STYLE: booleanish().default(true),
 
   MAIL_PROVIDER: z.enum(['smtp', 'ses', '']).default(''),
   MAIL_FROM: z.string().default('no-reply@hims.local'),
