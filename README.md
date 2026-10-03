@@ -53,6 +53,57 @@ pnpm db:seed      # two hospitals of demo data
 pnpm dev          # API on :4000, web on :3000
 ```
 
+### What has to be set before each step
+
+Short version: **`db:create` needs nothing** if you are using the bundled
+Docker PostgreSQL. The keys matter from `db:migrate` onwards.
+
+| Step | Needs | Why |
+|---|---|---|
+| `pnpm db:create` | nothing (defaults match the compose file) | Only connects as the bootstrap superuser to create roles and the database |
+| `pnpm db:migrate` | `DATABASE_MIGRATION_URL` | Defaults are correct if you did not change `DATABASE_DEV_PASSWORD` |
+| `pnpm db:seed` | the four keys below | It encrypts PHI, so it cannot run without them |
+| `pnpm dev` | the four keys below | The API validates configuration and **exits** rather than running unsafely |
+
+The four that must be real values, not the placeholders:
+
+```bash
+openssl rand -base64 32   # MASTER_KEY
+openssl rand -base64 32   # BLIND_INDEX_KEY     — must DIFFER from MASTER_KEY
+openssl rand -base64 48   # JWT_ACCESS_SECRET
+openssl rand -base64 48   # JWT_REFRESH_SECRET  — must DIFFER from the access secret
+```
+
+On Windows PowerShell, without OpenSSL:
+
+```powershell
+[Convert]::ToBase64String((1..32 | % { Get-Random -Max 256 }))   # 32-byte keys
+[Convert]::ToBase64String((1..48 | % { Get-Random -Max 256 }))   # 48-byte secrets
+```
+
+Both "must differ" rules are enforced at startup, not advisory. Reusing one key
+for encryption and for blind indexes lets anyone who can compute an index
+confirm a guessed plaintext against the ciphertext; reusing one JWT secret lets
+a leaked access token be replayed as a refresh token.
+
+Change `DATABASE_DEV_PASSWORD` only if you also change the passwords inside
+`DATABASE_URL` and `DATABASE_MIGRATION_URL` — `db:create` assigns the former to
+the roles it creates, and the other two are how the application then connects.
+
+### Where `.env` goes
+
+The repository root. `db:create` prints which files it read, so you can see
+your configuration was picked up:
+
+```
+PostgreSQL 16 — creating local database
+
+  config from .env
+```
+
+An `apps/api/.env` is also read if present and takes precedence, and real
+environment variables beat both — so CI and container secrets always win.
+
 ### Already have PostgreSQL installed?
 
 Skip step 1 entirely. `pnpm db:create` works against any PostgreSQL 15+ —

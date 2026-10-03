@@ -25,9 +25,9 @@
  *   pnpm db:create -- --drop       # drop and recreate (local only; refuses if not)
  */
 import { Client } from 'pg';
-import dotenv from 'dotenv';
+import { loadEnv } from '../config/load-env.js';
 
-dotenv.config();
+const ENV_FILES = loadEnv();
 
 const ADMIN_URL =
   process.env.DATABASE_ADMIN_URL ?? 'postgresql://postgres:postgres@localhost:5432/postgres';
@@ -173,6 +173,17 @@ async function main(): Promise<void> {
     }
 
     log(`\nPostgreSQL ${major} — creating local database\n`);
+
+    // Say which .env files were actually read. Under pnpm the working
+    // directory is the package, not the repo root, so "I edited .env and
+    // nothing changed" is an easy and confusing mistake to make.
+    if (ENV_FILES.loaded.length > 0) {
+      const root = ENV_FILES.repoRoot ?? '';
+      const shown = ENV_FILES.loaded.map((f) => f.replace(`${root}/`, '').replace(`${root}\\`, ''));
+      log(`  config from ${shown.join(', ')}\n`);
+    } else {
+      log('  no .env file found — using built-in defaults\n');
+    }
 
     // ---- Roles -------------------------------------------------------------
     for (const role of ROLES) {

@@ -6,10 +6,10 @@
  * first writes unrecoverable patient data, the second pages someone.
  */
 import { z } from 'zod';
-import dotenv from 'dotenv';
+import { loadEnv } from './load-env.js';
 import { booleanish } from '../utils/schema.js';
 
-dotenv.config();
+loadEnv();
 
 const PLACEHOLDERS = [
   'replace-with-32-byte-base64-key',
