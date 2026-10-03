@@ -14,7 +14,7 @@ touches every table and a re-encryption of everything. Scheduling UI can wait.
 
 | Deliverable | State |
 |---|---|
-| Multi-tenant schema, 65 tables, 11 migrations | Applied and verified |
+| Multi-tenant schema, 65 tables, 13 migrations | Applied and verified |
 | RLS on every tenant table, with migration-time assertions | 34 invariants passing |
 | Envelope encryption + blind indexes | Round-trip verified through the API |
 | Hash-chained audit trail | Tamper detection verified |

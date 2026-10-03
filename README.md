@@ -29,7 +29,8 @@ The brief left these open; the choices and their reasons:
 ## Quick start
 
 ```bash
-# 1. Infrastructure
+# 1. PostgreSQL (and Redis). Optional services sit behind a profile, so a
+#    registry hiccup in one of them can never stop the database coming up.
 docker compose -f infra/docker-compose.yml up -d
 
 # 2. Configuration
@@ -40,14 +41,52 @@ cp .env.example .env
 #      openssl rand -base64 48   # JWT_ACCESS_SECRET
 #      openssl rand -base64 48   # JWT_REFRESH_SECRET (must differ)
 
-# 3. Schema and demo data
+# 3. Database, schema and demo data
 pnpm install
-pnpm db:migrate
-pnpm db:seed
+pnpm db:create    # creates the `hims` database and its four roles
+pnpm db:migrate   # applies the schema
+pnpm db:seed      # two hospitals of demo data
 
 # 4. Run
 pnpm dev          # API on :4000, web on :3000
 ```
+
+### Already have PostgreSQL installed?
+
+Skip step 1 entirely. `pnpm db:create` works against any PostgreSQL 15+ —
+point it at yours and it creates the database and roles for you:
+
+```bash
+# .env
+DATABASE_ADMIN_URL=postgresql://postgres:yourpassword@localhost:5432/postgres
+```
+
+It is idempotent, so it is safe to re-run; `pnpm db:create -- --drop` recreates
+from scratch (and refuses to run against anything that is not localhost).
+
+### Why four database roles
+
+`db:create` makes `hims_owner`, `hims_app`, `hims_platform` and
+`hims_analytics` rather than running everything as one user. The separation is
+part of the security model, not ceremony: **an API connected as a superuser
+silently bypasses every row-level security policy in the schema**, so the
+isolation tests would pass while the running system leaked. `hims_app` holds no
+`BYPASSRLS`.
+
+### Optional services
+
+Object storage and the mail catcher are behind the `extras` profile:
+
+```bash
+docker compose -f infra/docker-compose.yml --profile extras up -d
+```
+
+> **Note.** MinIO is no longer published on Docker Hub — `minio/minio:latest`
+> fails with *"pull access denied … repository does not exist"*. The compose
+> file pulls from MinIO's own registry (quay.io) instead, and `MINIO_IMAGE` in
+> `.env` overrides it if you need a specific dated `RELEASE` tag or a different
+> S3-compatible server. Nothing in the `extras` profile is needed to run the
+> application.
 
 ### Demo accounts
 
@@ -142,6 +181,8 @@ More in [`docs/screenshots/`](docs/screenshots/), including both themes and a
 pnpm dev                 # API + web
 pnpm build               # both
 pnpm typecheck           # both — currently clean
+pnpm db:create           # create the database and its roles (idempotent)
+pnpm db:create -- --drop # drop and recreate (localhost only)
 pnpm db:migrate          # apply pending migrations
 pnpm db:status           # applied vs pending
 pnpm db:verify           # checksums, RLS coverage, audit-chain integrity
@@ -158,7 +199,7 @@ pnpm --filter @hims/api worker:scheduler       # maintenance tasks
 ```
 apps/
   api/
-    migrations/      11 ordered SQL migrations; the authoritative schema
+    migrations/      13 ordered SQL migrations; the authoritative schema
     seeds/           verify_invariants.sql — 34 behavioural checks
     src/
       config/        environment validation; exits on unsafe configuration

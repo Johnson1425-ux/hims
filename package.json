@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "Multi-tenant Hospital Management System",
-  "engines": { "node": ">=20.11" },
+  "engines": {
+    "node": ">=20.11"
+  },
   "packageManager": "pnpm@10.28.0",
   "scripts": {
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
@@ -11,6 +13,7 @@
     "lint": "pnpm --filter \"./apps/*\" lint",
     "typecheck": "pnpm --filter \"./apps/*\" typecheck",
     "test": "pnpm --filter \"./apps/*\" test",
+    "db:create": "pnpm --filter @hims/api db:create",
     "db:migrate": "pnpm --filter @hims/api db:migrate",
     "db:verify": "pnpm --filter @hims/api db:verify",
     "db:seed": "pnpm --filter @hims/api db:seed"

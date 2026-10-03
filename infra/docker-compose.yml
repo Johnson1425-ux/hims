@@ -1,5 +1,17 @@
 # Local development stack.
 #
+# `docker compose up -d` brings up ONLY what the application needs to run:
+# PostgreSQL and Redis. Object storage and the mail catcher sit behind the
+# `extras` profile:
+#
+#   docker compose -f infra/docker-compose.yml up -d                    # db + redis
+#   docker compose -f infra/docker-compose.yml --profile extras up -d   # everything
+#
+# The split is not tidiness. MinIO was pulled from Docker Hub, and with every
+# service in the default set a registry change in an optional dev dependency
+# stopped the database from starting at all. Nothing optional should be able to
+# block the thing the application actually depends on.
+#
 # The database is initialised with THREE roles rather than one, because the
 # privilege separation is part of the security model and is easy to lose if
 # development runs everything as a superuser:
@@ -54,8 +66,15 @@ services:
       retries: 10
 
   # S3-compatible object storage for documents, scans and signatures.
+  #
+  # NOTE: `minio/minio` is no longer published on Docker Hub — a pull of
+  # `minio/minio:latest` fails with "pull access denied ... repository does not
+  # exist". MinIO publishes to its own registry (quay.io) instead. Override
+  # MINIO_IMAGE in .env if you need a specific dated RELEASE tag, or point it at
+  # any S3-compatible server you prefer.
   minio:
-    image: minio/minio:latest
+    image: ${MINIO_IMAGE:-quay.io/minio/minio:latest}
+    profiles: ['extras']
     container_name: hims-minio
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-hims-dev}
@@ -76,7 +95,8 @@ services:
   # real patient. The notification worker also refuses to send without an
   # explicitly configured provider.
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.31
+    profiles: ['extras']
     container_name: hims-mailpit
     ports:
       - '1025:1025'

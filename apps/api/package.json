@@ -12,6 +12,7 @@
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "db:create": "tsx src/db/create.ts",
     "db:migrate": "tsx src/db/migrate.ts up",
     "db:status": "tsx src/db/migrate.ts status",
     "db:verify": "tsx src/db/migrate.ts verify",

@@ -82,6 +82,35 @@ Defence (4) earned its place: `v_stock_status` shipped without
 default, it returned every tenant's stock to every caller. The only visible
 symptom was duplicated rows.
 
+### The owner exemption on three tables
+
+`users`, `tenants` and `auth_sessions` are `ENABLE`d but not `FORCE`d (migration
+0013). This is deliberate and narrow.
+
+Authentication is a bootstrap problem: a login request knows only an email
+address, a refresh request only a cookie. Neither knows the tenant yet, so
+neither can set the context every policy keys on. That is what the two
+`SECURITY DEFINER` functions exist for — but `FORCE` subjects the table *owner*
+to its policies too, so those functions were filtered to nothing and **nobody
+could log in**. The failure is invisible when migrations run as a superuser,
+which is one more reason development should not do that.
+
+What changes, precisely:
+
+- `hims_app` — the role the API runs as — is **not** the owner. RLS applies to
+  it in full, unchanged, on these tables as on every other. *Verified: with a
+  tenant context it sees 1 of 2 tenants, 7 of 14 users, 5 of 10 patients; with
+  no context it sees nothing; cross-tenant writes still match zero rows.*
+- Only the schema owner gains unfiltered access, and only on these three tables.
+  The owner is a deploy-time role, not the runtime identity.
+
+The security given up is smaller than it looks: `FORCE` was never a boundary
+against the owner, who can issue `ALTER TABLE … NO FORCE` at will. It guards
+against *accidental* owner-context queries, and a parameterised function
+granted solely to `hims_app` is not that. The alternative — reassigning the
+functions to the `BYPASSRLS` role — would require a superuser in the deploy
+path, which is a worse trade.
+
 ## 4. Encryption
 
 ```

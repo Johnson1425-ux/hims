@@ -1,6 +1,6 @@
 # Data model
 
-65 tables across 11 migrations. This document gives the relational map, the
+65 tables across 13 migrations. This document gives the relational map, the
 reasoning behind the non-obvious choices, and the invariants the schema
 enforces. The authoritative definition is `apps/api/migrations/`.
 

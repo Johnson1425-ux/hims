@@ -110,6 +110,15 @@ async function main(): Promise<void> {
       const tenantId = idRows[0]!.id;
       const dek = generateTenantDataKey(tenantId);
 
+      // Context is set BEFORE the insert, not after.
+      //
+      // `tenants` is FORCE ROW LEVEL SECURITY, which applies to the table owner
+      // too — and the seed runs as hims_owner, not a superuser. Its policy is
+      // `id = current_tenant_id()`, so without this the very first INSERT is
+      // refused. Setting the context first also means the seed exercises the
+      // same policies the application does, rather than tunnelling under them.
+      await client.query('SELECT hims_util.set_request_context($1, NULL, false)', [tenantId]);
+
       await client.query(
         `INSERT INTO tenants (id, slug, legal_name, display_name, facility_code, timezone,
                               dek_wrapped, dek_key_version, status, branding)
@@ -635,31 +644,6 @@ async function main(): Promise<void> {
         'tenant seeded',
       );
     }
-
-    // ---- Built-in notification templates (tenant_id NULL = shared) ---------
-    await client.query('SELECT hims_util.clear_request_context()');
-
-    await client.query(
-      `INSERT INTO notification_templates (tenant_id, key, channel, subject, body, phi_safe)
-       VALUES
-         (NULL, 'appointment_reminder', 'sms', NULL,
-          'Reminder: your appointment with {{providerName}} is on {{appointmentDate}} at {{appointmentTime}}, {{locationName}}. Reply STOP to opt out.',
-          true),
-         (NULL, 'appointment_reminder', 'email', 'Your upcoming appointment',
-          'Your appointment with {{providerName}} is scheduled for {{appointmentDate}} at {{appointmentTime}} at {{locationName}}.',
-          true),
-         (NULL, 'password_reset', 'email', 'Reset your password',
-          'Use this link to set a new password: {{resetUrl}}. It expires in one hour.',
-          true),
-         (NULL, 'staff_invitation', 'email', 'You have been invited',
-          'Hello {{fullName}}, set up your account here: {{inviteUrl}}. The link expires in 7 days.',
-          true),
-         (NULL, 'waitlist_slot_offer', 'sms', NULL,
-          'An earlier appointment has become available at {{slotAt}}. Call the clinic within 4 hours to take it.',
-          true),
-         (NULL, 'stock_alert', 'in_app', 'Stock alert', '{{message}}', true)
-       ON CONFLICT DO NOTHING`,
-    );
 
     logger.info(
       { tenants: TENANTS.length, password: DEMO_PASSWORD },
