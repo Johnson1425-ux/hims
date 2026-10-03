@@ -68,6 +68,46 @@ function isLocal(url: string): boolean {
 }
 
 /**
+ * Detect a data volume left over from an earlier version of the compose file.
+ *
+ * That file once set `POSTGRES_USER: hims_owner`, which makes hims_owner the
+ * cluster SUPERUSER. Because `POSTGRES_USER` is only honoured when the volume
+ * is first initialised, pulling the corrected file recreates the container but
+ * leaves that cluster — and its superuser — in place, so connecting as
+ * `postgres` fails with an error that reads identically to a wrong password.
+ *
+ * Trying exactly one candidate turns "here are two things it might be" into a
+ * definite answer. The credential is one this project would itself have
+ * created, the host is already known to be local, and nothing proceeds on the
+ * result: it is used only to name the cause.
+ */
+async function probeForStaleVolume(host: string, port: string): Promise<string | null> {
+  const candidates = ['hims_owner'];
+
+  for (const candidate of candidates) {
+    const probe = new Client({
+      host,
+      port: Number(port),
+      user: candidate,
+      password: DEV_PASSWORD,
+      database: 'postgres',
+      application_name: 'hims-db-create-probe',
+      connectionTimeoutMillis: 4000,
+    });
+
+    try {
+      await probe.connect();
+      await probe.end();
+      return candidate;
+    } catch {
+      await probe.end().catch(() => undefined);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Explain a failed connection in terms of what is actually likely to be wrong.
  *
  * PostgreSQL deliberately returns the SAME "password authentication failed"
@@ -76,7 +116,7 @@ function isLocal(url: string): boolean {
  * usernames. That is correct of PostgreSQL and unhelpful here, so this spells
  * out the two causes that actually produce it during local setup.
  */
-function reportConnectionFailure(error: unknown): void {
+async function reportConnectionFailure(error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
   const code = (error as { code?: string }).code;
   const redacted = ADMIN_URL.replace(/:[^:@]*@/, ':***@');
@@ -109,6 +149,37 @@ function reportConnectionFailure(error: unknown): void {
 
   if (authFailed) {
     log(`Something IS listening on ${host}:${port}, but it rejected the credentials.`);
+
+    // Rather than listing possibilities, find out. The only credential worth
+    // probing is the one an EARLIER version of this project's own compose file
+    // would have created, so this identifies a stale data volume precisely.
+    // Local hosts only, and it reports rather than proceeding.
+    const stale = isLocal(ADMIN_URL) ? await probeForStaleVolume(host, port) : null;
+
+    if (stale) {
+      log('');
+      log(`  DIAGNOSED: the server accepted "${stale}" instead of "${user}".`);
+      log('');
+      log(`  "${stale}" was the superuser in an EARLIER version of`);
+      log('  infra/docker-compose.yml. POSTGRES_USER is read only when the data');
+      log('  volume is first initialised, so pulling the updated file recreated');
+      log('  the container but left the original cluster — and its original');
+      log('  superuser — untouched inside the volume.');
+      log('');
+      log('  Removing the volume is the fix. `down` alone is not enough:');
+      log('');
+      log('    docker compose -f infra/docker-compose.yml down -v');
+      log('    docker compose -f infra/docker-compose.yml up -d');
+      log('    pnpm db:create');
+      log('');
+      log('  This discards the database, which at this stage holds nothing but');
+      log('  seed data. Do NOT instead point DATABASE_ADMIN_URL at');
+      log(`  "${stale}": it is a superuser there, and a superuser bypasses`);
+      log('  row-level security entirely — tenant isolation would be inert.');
+      log('');
+      return;
+    }
+
     log('PostgreSQL returns this same message whether the password is wrong or the');
     log(`role "${user}" does not exist, so both are worth checking.\n`);
 
@@ -153,7 +224,7 @@ async function main(): Promise<void> {
   try {
     await client.connect();
   } catch (error) {
-    reportConnectionFailure(error);
+    await reportConnectionFailure(error);
     process.exit(1);
   }
 
