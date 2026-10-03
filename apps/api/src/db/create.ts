@@ -24,15 +24,26 @@
  *   pnpm db:create                 # uses DATABASE_ADMIN_URL, or a sensible default
  *   pnpm db:create -- --drop       # drop and recreate (local only; refuses if not)
  */
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
 import { Client } from 'pg';
 import { loadEnv } from '../config/load-env.js';
 
+const execFileAsync = promisify(execFile);
+
 const ENV_FILES = loadEnv();
 
+// 5433 matches the host port infra/docker-compose.yml publishes by default;
+// see the comment there for why it is not 5432.
 const ADMIN_URL =
-  process.env.DATABASE_ADMIN_URL ?? 'postgresql://postgres:postgres@localhost:5432/postgres';
+  process.env.DATABASE_ADMIN_URL ?? 'postgresql://postgres:postgres@localhost:5433/postgres';
 
 const DB_NAME = process.env.DATABASE_NAME ?? 'hims';
+/** Fixed by infra/docker-compose.yml, so it can be named in diagnostics. */
+const CONTAINER = 'hims-postgres';
+/** Every variable that has to agree about which port PostgreSQL is on. */
+const URL_VARS = ['DATABASE_ADMIN_URL', 'DATABASE_URL', 'DATABASE_MIGRATION_URL'] as const;
 const DEV_PASSWORD = process.env.DATABASE_DEV_PASSWORD ?? 'dev-only-password';
 
 const ROLES = [
@@ -67,6 +78,194 @@ function isLocal(url: string): boolean {
   }
 }
 
+/** A named cause, as opposed to a list of things it might be. */
+interface Diagnosis {
+  headline: string;
+  lines: string[];
+}
+
+function portOf(url: string): string | null {
+  try {
+    return new URL(url).port || '5432';
+  } catch {
+    return null;
+  }
+}
+
+/** The same URL with a different port, credentials masked, safe to print. */
+function retargeted(url: string, port: string): string | null {
+  try {
+    const parsed = new URL(url);
+    parsed.port = port;
+    return parsed.toString().replace(/:\/\/([^:/@]*):[^@]*@/, '://$1:<password>@');
+  } catch {
+    return null;
+  }
+}
+
+/** The .env lines needed to move every client URL to `port`. */
+function urlPortFixes(port: string): string[] {
+  return URL_VARS.map((name) => {
+    const current = process.env[name];
+    const retarget = current ? retargeted(current, port) : null;
+    return `  ${name}=${retarget ?? `postgresql://...@localhost:${port}/...`}`;
+  });
+}
+
+/**
+ * Warn when POSTGRES_PORT and the DATABASE_* URLs disagree.
+ *
+ * POSTGRES_PORT decides where docker compose PUBLISHES the container; the URLs
+ * decide where clients look. Nothing links the two, and a mismatch does not
+ * produce a connection error — it produces an authentication error from
+ * whatever else happens to hold the port the URLs name, which is the least
+ * informative symptom available. Checking agreement before connecting lets it
+ * be said plainly instead.
+ */
+function checkPortAgreement(): void {
+  const declared = process.env.POSTGRES_PORT;
+  if (!declared) return;
+
+  const disagree = URL_VARS.filter((name) => {
+    const url = process.env[name];
+    if (!url || !isLocal(url)) return false;
+    return portOf(url) !== declared;
+  });
+
+  if (disagree.length === 0) return;
+
+  log(`\n  WARNING: POSTGRES_PORT is ${declared}, but these still point elsewhere:\n`);
+  for (const name of disagree) {
+    log(`    ${name.padEnd(24)} port ${portOf(process.env[name] ?? '') ?? '?'}`);
+  }
+  log('\n  All four have to agree. Unless you meant to point them at a different');
+  log('  server, update .env:\n');
+  for (const line of urlPortFixes(declared)) log(`  ${line}`);
+  log('');
+}
+
+async function docker(args: string[]): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('docker', args, { timeout: 15_000 });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ask the container itself what is wrong.
+ *
+ * `password authentication failed` comes from the server that ANSWERED, and on
+ * Windows and macOS that is often not the container: the PostgreSQL installer
+ * registers a service that starts at boot, and a published container port can
+ * appear to bind while still losing `localhost` to the service already
+ * listening there. The error then names credentials, when the real fault is
+ * which server replied.
+ *
+ * Three facts from the container separate the cases: whether it is running,
+ * which host port Docker published it on, and whether these same credentials
+ * work inside it. Credentials that work inside but fail over the published
+ * port prove the listener on that port is something else. Credentials that
+ * fail inside too are a genuine credential problem, so this returns null and
+ * leaves the stale-volume probe to it.
+ *
+ * Read-only, bounded by a timeout, and silent when Docker or the container is
+ * absent.
+ */
+async function diagnoseFromContainer(
+  host: string,
+  port: string,
+  user: string,
+  password: string,
+): Promise<Diagnosis | null> {
+  const running = await docker(['inspect', '-f', '{{.State.Running}}', CONTAINER]);
+
+  // No Docker, no daemon, or no such container: nothing to say.
+  if (running === null) return null;
+
+  if (running !== 'true') {
+    return {
+      headline: `the container ${CONTAINER} exists but is not running.`,
+      lines: [
+        'Whatever answered on that port, it was not this project’s database.',
+        'Start the container, then re-run:',
+        '',
+        '  docker compose -f infra/docker-compose.yml up -d',
+        '  pnpm db:create',
+      ],
+    };
+  }
+
+  const published = await docker([
+    'inspect',
+    '-f',
+    '{{range $p := index .NetworkSettings.Ports "5432/tcp"}}{{$p.HostPort}}{{end}}',
+    CONTAINER,
+  ]);
+
+  // `docker exec` reaches the server directly, past the published port and
+  // anything competing for it. -h forces TCP: the image trusts unix-socket
+  // connections, which would accept any password and prove nothing.
+  const inside = await docker([
+    'exec',
+    '-e',
+    `PGPASSWORD=${password}`,
+    CONTAINER,
+    'psql',
+    '-h',
+    '127.0.0.1',
+    '-U',
+    user,
+    '-d',
+    'postgres',
+    '-tAc',
+    'select 1',
+  ]);
+
+  // The container rejects them too, so the port is not what is wrong.
+  if (inside !== '1') return null;
+
+  if (published && published !== port) {
+    return {
+      headline: `the container is published on port ${published}, not ${port}.`,
+      lines: [
+        `The credentials are correct. Docker has the container on ${published},`,
+        `while the DATABASE_* URLs say ${port}, so the connection went somewhere`,
+        'else. In .env:',
+        '',
+        ...urlPortFixes(published),
+      ],
+    };
+  }
+
+  return {
+    headline: `another PostgreSQL is answering on ${host}:${port}.`,
+    lines: [
+      `The credentials are correct — they work inside ${CONTAINER}, which`,
+      `Docker has published on ${port}. Something else holds that port for`,
+      '`localhost`, so the connection never reaches the container. On Windows',
+      'and macOS this is the service the PostgreSQL installer registers to',
+      'start at boot.',
+      '',
+      'Move the container to a free port. All four values have to agree, so',
+      'in .env:',
+      '',
+      '  POSTGRES_PORT=5433',
+      ...urlPortFixes('5433'),
+      '',
+      'then recreate the container so the new mapping applies:',
+      '',
+      '  docker compose -f infra/docker-compose.yml up -d --force-recreate',
+      '  pnpm db:create',
+      '',
+      'The data volume is untouched, so nothing is lost. Stopping the native',
+      'service works too, but moving aside is the smaller change — and it',
+      'leaves whatever else uses that server alone.',
+    ],
+  };
+}
+
 /**
  * Detect a data volume left over from an earlier version of the compose file.
  *
@@ -81,7 +280,7 @@ function isLocal(url: string): boolean {
  * created, the host is already known to be local, and nothing proceeds on the
  * result: it is used only to name the cause.
  */
-async function probeForStaleVolume(host: string, port: string): Promise<string | null> {
+async function probeForStaleVolume(host: string, port: string): Promise<Diagnosis | null> {
   const candidates = ['hims_owner'];
 
   for (const candidate of candidates) {
@@ -98,13 +297,41 @@ async function probeForStaleVolume(host: string, port: string): Promise<string |
     try {
       await probe.connect();
       await probe.end();
-      return candidate;
+      return {
+        headline: `the server accepted "${candidate}" instead of the configured user.`,
+        lines: [
+          `"${candidate}" was the superuser in an EARLIER version of`,
+          'infra/docker-compose.yml. POSTGRES_USER is read only when the data',
+          'volume is first initialised, so pulling the updated file recreated',
+          'the container but left the original cluster — and its original',
+          'superuser — untouched inside the volume.',
+          '',
+          'Removing the volume is the fix. `down` alone is not enough:',
+          '',
+          '  docker compose -f infra/docker-compose.yml down -v',
+          '  docker compose -f infra/docker-compose.yml up -d',
+          '  pnpm db:create',
+          '',
+          'This discards the database, which at this stage holds nothing but',
+          `seed data. Do NOT instead point DATABASE_ADMIN_URL at "${candidate}":`,
+          'it is a superuser there, and a superuser bypasses row-level security',
+          'entirely — tenant isolation would be inert.',
+        ],
+      };
     } catch {
       await probe.end().catch(() => undefined);
     }
   }
 
   return null;
+}
+
+function reportDiagnosis(diagnosis: Diagnosis): void {
+  log('');
+  log(`  DIAGNOSED: ${diagnosis.headline}`);
+  log('');
+  for (const line of diagnosis.lines) log(line === '' ? '' : `  ${line}`);
+  log('');
 }
 
 /**
@@ -124,11 +351,13 @@ async function reportConnectionFailure(error: unknown): Promise<void> {
   let host = 'localhost';
   let port = '5432';
   let user = 'postgres';
+  let password = '';
   try {
     const url = new URL(ADMIN_URL);
     host = url.hostname || host;
     port = url.port || port;
     user = decodeURIComponent(url.username) || user;
+    password = decodeURIComponent(url.password);
   } catch {
     // Keep the defaults; the URL itself is reported below either way.
   }
@@ -150,34 +379,17 @@ async function reportConnectionFailure(error: unknown): Promise<void> {
   if (authFailed) {
     log(`Something IS listening on ${host}:${port}, but it rejected the credentials.`);
 
-    // Rather than listing possibilities, find out. The only credential worth
-    // probing is the one an EARLIER version of this project's own compose file
-    // would have created, so this identifies a stale data volume precisely.
-    // Local hosts only, and it reports rather than proceeding.
-    const stale = isLocal(ADMIN_URL) ? await probeForStaleVolume(host, port) : null;
+    // Rather than listing possibilities, find out which one it is. Both checks
+    // are local-host only, read-only, and report rather than proceeding.
+    if (isLocal(ADMIN_URL)) {
+      const diagnosis =
+        (await diagnoseFromContainer(host, port, user, password)) ??
+        (await probeForStaleVolume(host, port));
 
-    if (stale) {
-      log('');
-      log(`  DIAGNOSED: the server accepted "${stale}" instead of "${user}".`);
-      log('');
-      log(`  "${stale}" was the superuser in an EARLIER version of`);
-      log('  infra/docker-compose.yml. POSTGRES_USER is read only when the data');
-      log('  volume is first initialised, so pulling the updated file recreated');
-      log('  the container but left the original cluster — and its original');
-      log('  superuser — untouched inside the volume.');
-      log('');
-      log('  Removing the volume is the fix. `down` alone is not enough:');
-      log('');
-      log('    docker compose -f infra/docker-compose.yml down -v');
-      log('    docker compose -f infra/docker-compose.yml up -d');
-      log('    pnpm db:create');
-      log('');
-      log('  This discards the database, which at this stage holds nothing but');
-      log('  seed data. Do NOT instead point DATABASE_ADMIN_URL at');
-      log(`  "${stale}": it is a superuser there, and a superuser bypasses`);
-      log('  row-level security entirely — tenant isolation would be inert.');
-      log('');
-      return;
+      if (diagnosis) {
+        reportDiagnosis(diagnosis);
+        return;
+      }
     }
 
     log('PostgreSQL returns this same message whether the password is wrong or the');
@@ -194,15 +406,17 @@ async function reportConnectionFailure(error: unknown): Promise<void> {
 
     log(`  2. A different PostgreSQL already on port ${port}.`);
     log('     Common on Windows and macOS, where the installer registers a');
-    log('     service that starts at boot and takes the port before Docker.\n');
+    log('     service that starts at boot and takes the port before Docker.');
+    log('     The compose file publishes 5433 by default to stay clear of it,');
+    log('     so this is worth checking if you moved it back to 5432.\n');
     log('       Windows:  netstat -ano | findstr :' + port);
     log('       macOS:    lsof -nP -iTCP:' + port + ' -sTCP:LISTEN');
     log('       Linux:    ss -lptn "sport = :' + port + '"\n');
     log('     Either point DATABASE_ADMIN_URL at that server with its own');
-    log('     password, or move the container aside:\n');
-    log('       POSTGRES_PORT=5433 docker compose -f infra/docker-compose.yml up -d');
-    log('       # then set DATABASE_ADMIN_URL / DATABASE_URL / DATABASE_MIGRATION_URL');
-    log('       # in .env to use :5433\n');
+    log('     password, or leave POSTGRES_PORT at its default and set these to');
+    log('     match:\n');
+    for (const line of urlPortFixes('5433')) log(`    ${line}`);
+    log('');
     return;
   }
 
@@ -218,6 +432,11 @@ async function main(): Promise<void> {
     log('refusing --drop against a non-local host. Check DATABASE_ADMIN_URL.');
     process.exit(1);
   }
+
+  // Said before connecting, because a port mismatch surfaces as an
+  // authentication error from an unrelated server rather than as a failure to
+  // connect, and that is almost impossible to read backwards.
+  checkPortAgreement();
 
   const client = new Client({ connectionString: ADMIN_URL, application_name: 'hims-db-create' });
 

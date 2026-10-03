@@ -45,11 +45,20 @@ services:
       # Deterministic collation, so index ordering matches across machines.
       POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=und-x-icu'
     ports:
-      # Overridable because a locally installed PostgreSQL often already holds
-      # 5432 — on Windows and macOS the installer registers a service that
-      # starts at boot. `POSTGRES_PORT=5433 docker compose up -d` moves this
-      # one aside; remember to match it in the DATABASE_* URLs in .env.
-      - '${POSTGRES_PORT:-5432}:5432'
+      # 5433 on the host, not 5432, and that default is deliberate.
+      #
+      # On Windows and macOS the PostgreSQL installer registers a service that
+      # starts at boot and holds 5432. Publishing there too does not reliably
+      # fail: the bind can succeed while `localhost` still resolves to the
+      # service that was already listening, so clients reach the wrong server
+      # and the only symptom is "password authentication failed" — an error
+      # that points at credentials when the fault is which server answered.
+      #
+      # Moving aside by default costs nothing and removes the whole class of
+      # problem. Set POSTGRES_PORT=5432 to use the conventional port, and
+      # match it in the DATABASE_* URLs in .env; `pnpm db:create` checks that
+      # the two agree before it connects.
+      - '${POSTGRES_PORT:-5433}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
