@@ -39,14 +39,17 @@ import { useSession } from '@/lib/session';
 import {
   api,
   ApiError,
+  type AccessLogEntry,
   type BreakGlassGrant,
+  type PatientSummary,
   type RevenueReport,
   type UtilisationRow,
 } from '@/lib/api';
+import { PatientPicker } from '@/components/ui/patient-picker';
 import { formatDateTime, formatMoney, formatNumber, formatRelative, humanise } from '@/lib/format';
 import { IconChart, IconShield } from '@/components/layout/icons';
 
-type Section = 'utilisation' | 'revenue' | 'compliance';
+type Section = 'utilisation' | 'revenue' | 'compliance' | 'disclosures';
 
 /** A no-show rate is not linear in concern: 10% is a bad week, 25% is a problem. */
 function noShowTone(pct: number | null): Tone {
@@ -86,6 +89,11 @@ export default function ReportsPage() {
         label: 'Compliance',
         hint: 'Emergency access awaiting review',
       });
+      available.push({
+        value: 'disclosures',
+        label: 'Disclosures',
+        hint: 'Who opened one patient\u2019s record, and on what basis',
+      });
     }
     return available;
   }, [can]);
@@ -97,6 +105,8 @@ export default function ReportsPage() {
   const [utilisation, setUtilisation] = useState<UtilisationRow[]>([]);
   const [revenue, setRevenue] = useState<RevenueReport | null>(null);
   const [grants, setGrants] = useState<BreakGlassGrant[]>([]);
+  const [subject, setSubject] = useState<PatientSummary | null>(null);
+  const [disclosures, setDisclosures] = useState<AccessLogEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,9 +128,21 @@ export default function ReportsPage() {
         } else if (section === 'revenue') {
           const { data } = await api.get<RevenueReport>('/reports/revenue', { from, to }, signal);
           setRevenue(data);
-        } else {
+        } else if (section === 'compliance') {
           const { data } = await api.get<BreakGlassGrant[]>('/reports/break-glass-review', undefined, signal);
           setGrants(data);
+        } else if (subject) {
+          // Running this report is itself an access to the record, and is
+          // logged as one — which is why it needs a named patient rather than
+          // offering a browsable list of everybody's access history.
+          const { data } = await api.get<AccessLogEntry[]>(
+            `/reports/patient-access-log/${subject.id}`,
+            { from, to },
+            signal,
+          );
+          setDisclosures(data);
+        } else {
+          setDisclosures(null);
         }
       } catch (caught) {
         if (caught instanceof ApiError) setError(caught.message);
@@ -128,7 +150,7 @@ export default function ReportsPage() {
         setLoading(false);
       }
     },
-    [section, from, to],
+    [section, from, to, subject],
   );
 
   useEffect(() => {
@@ -523,6 +545,98 @@ export default function ReportsPage() {
               )}
             </Card>
           </div>
+        </>
+      ) : section === 'disclosures' ? (
+        <>
+          <div className="mb-5">
+            <Card>
+              <CardHeader
+                title="Accounting of disclosures"
+                subtitle="HIPAA §164.528 — a patient is entitled to a list of who accessed their record"
+              />
+              <PatientPicker value={subject} onChange={setSubject} label="Whose record" />
+              <p className="mt-3 text-[0.8125rem]" style={{ color: 'var(--ink-muted)' }}>
+                Running this is itself an access to the record, and is logged as one. That is why it
+                asks for a named patient rather than offering everybody's history to browse.
+              </p>
+            </Card>
+          </div>
+
+          {subject === null ? null : disclosures === null ? (
+            <Card>
+              <EmptyState icon={<IconShield />} title="No accesses in this period" />
+            </Card>
+          ) : (
+            <Card padded={false}>
+              <div className="p-5 pb-0">
+                <CardHeader
+                  title={`${formatNumber(disclosures.length)} access${disclosures.length === 1 ? '' : 'es'}`}
+                  subtitle={`${subject.fullName} · ${subject.mrn} · ${from} to ${to}`}
+                />
+              </div>
+
+              {disclosures.length === 0 ? (
+                <EmptyState
+                  icon={<IconShield />}
+                  title="Nobody opened this record in this period"
+                  description="Widen the dates if you are answering a request that goes further back."
+                />
+              ) : (
+                <div className="px-5 pb-1">
+                  <Table>
+                    <thead>
+                      <tr>
+                        <Th>When</Th>
+                        <Th>Who</Th>
+                        <Th>What they did</Th>
+                        <Th>On what basis</Th>
+                        <Th align="right">Outcome</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {disclosures.map((entry, index) => (
+                        <Tr key={`${entry.occurred_at}-${index}`}>
+                          <Td numeric style={{ color: 'var(--ink-muted)' }}>
+                            {formatDateTime(entry.occurred_at)}
+                          </Td>
+                          <Td>
+                            <span className="block" style={{ color: 'var(--ink)' }}>
+                              {entry.actor_label ?? 'Unknown'}
+                            </span>
+                            {entry.actor_role ? (
+                              <span className="text-[0.75rem]" style={{ color: 'var(--ink-muted)' }}>
+                                {humanise(entry.actor_role)}
+                              </span>
+                            ) : null}
+                          </Td>
+                          <Td style={{ color: 'var(--ink-secondary)' }}>
+                            {humanise(entry.action)}
+                            <span className="block text-[0.75rem]" style={{ color: 'var(--ink-muted)' }}>
+                              {humanise(entry.resource_type)}
+                            </span>
+                          </Td>
+                          <Td>
+                            {entry.access_basis ? (
+                              <Badge tone={entry.access_basis === 'break_glass' ? 'serious' : 'neutral'} dot>
+                                {humanise(entry.access_basis)}
+                              </Badge>
+                            ) : (
+                              <span style={{ color: 'var(--ink-muted)' }}>—</span>
+                            )}
+                          </Td>
+                          <Td align="right">
+                            <Badge tone={entry.outcome === 'denied' ? 'critical' : 'good'}>
+                              {humanise(entry.outcome)}
+                            </Badge>
+                          </Td>
+                        </Tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              )}
+            </Card>
+          )}
         </>
       ) : (
         <>

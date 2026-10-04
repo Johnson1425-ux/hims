@@ -409,9 +409,14 @@ PASS  no context leak across transactions; unset context returns zero rows
 | **Billing** | Price snapshotting, trigger-maintained totals, AR ageing, X12-shaped claim construction with pre-submission validation |
 | **Reports** | Read-only transactions, permission-aware projections, HIPAA §164.528 disclosure accounting |
 
-Every screen in the sidebar is built against the live API: patients,
-appointments, encounters, dispensing, inventory, billing, staff, reports and
-settings. Amounts are in Tanzanian shillings, taken from the tenant's own
+Every endpoint the API exposes is reachable from the interface — registration,
+booking, clinical documentation and signing, prescribing with its safety
+screen, dispensing, goods receipt and stock adjustment, invoicing, payments,
+claims, staff invitation and rota, emergency access, password management, and
+the §164.528 disclosure report. The one exception is `GET /auth/me`, which the
+browser never needs: the refresh call already returns the signed-in user.
+
+Amounts are in Tanzanian shillings, taken from the tenant's own
 `currency` and `locale` — see [`docs/02-data-model.md` § Money](docs/02-data-model.md)
 for why the currency decides the scale and not just the symbol.
 

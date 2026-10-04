@@ -221,14 +221,14 @@ export function AppShell({ children }: { children: ReactNode }): ReactNode {
             style={{ background: 'var(--surface-sunken)' }}
           >
             <Avatar name={user.fullName} size={32} />
-            <div className="min-w-0 flex-1">
+            <Link href="/account" className="min-w-0 flex-1" title="My account">
               <p className="truncate text-[0.8125rem] font-medium" style={{ color: 'var(--ink)' }}>
                 {user.fullName}
               </p>
               <p className="truncate text-[0.6875rem] capitalize" style={{ color: 'var(--ink-muted)' }}>
                 {user.roles.map((r) => r.replace(/_/g, ' ')).join(', ')}
               </p>
-            </div>
+            </Link>
             <button
               type="button"
               onClick={() => void signOut()}

@@ -129,4 +129,7 @@ reflowing into unreadable stacks. Verified at 390 × 844.
 | `light-09-staff`, `dark-09-staff` | Directory with licence expiry sorted above the alphabet |
 | `light-10-reports`, `dark-10-reports` | Revenue: payer mix, collection meters, denial reasons, all in TSh |
 | `light-11-settings`, `dark-11-settings` | Hospital profile; the currency field states that it changes scale, not just symbol |
+| `light-12-chart-full`, `dark-12-chart-full` | The whole chart: problems, visits linked to their encounters, medication history |
+| `light-13-registration`, `dark-13-registration` | Registration; the duplicate refusal renders as the people it matched |
+| `light-14-booking`, `dark-14-booking` | 154 free slots across ten days, computed from the rota and what is already booked |
 | `mobile-01-dashboard`, `mobile-02-patients` | 390px ward tablet |

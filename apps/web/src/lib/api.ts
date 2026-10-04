@@ -820,3 +820,14 @@ export interface PatientPrescription {
     status: string;
   }>;
 }
+
+export interface AccessLogEntry {
+  occurred_at: string;
+  action: string;
+  actor_label: string | null;
+  actor_role: string | null;
+  outcome: string;
+  resource_type: string;
+  access_basis: string | null;
+  ip_address: string | null;
+}

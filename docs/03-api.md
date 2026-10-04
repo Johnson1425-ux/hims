@@ -211,6 +211,7 @@ Justification minimum 20 characters, enforced by schema **and** database CHECK.
 
 | Method | Path | Permission |
 |---|---|---|
+| `GET` | `/appointments/types` | `appointment:read` / `portal:self_read` |
 | `GET` | `/appointments/availability` | `appointment:write` / `portal:self_booking` |
 | `GET` | `/appointments` | `appointment:read` / `portal:self_read` |
 | `POST` | `/appointments` | `appointment:write` / `portal:self_booking` |
@@ -278,6 +279,7 @@ immediately rebookable, and offers it to the waitlist in priority order.
 | Method | Path | Permission |
 |---|---|---|
 | `GET` | `/encounters` | `encounter:read` |
+| `GET` | `/encounters/:id` | `encounter:read` |
 | `POST` | `/encounters` | `encounter:write` |
 | `PATCH` | `/encounters/:id` | `encounter:write` |
 | `POST` | `/encounters/:id/sign` | `encounter:sign` |
@@ -362,6 +364,7 @@ interactions" is more dangerous than its absence.
 | `POST` | `/inventory/stock/receive` | `inventory:write` |
 | `POST` | `/inventory/stock/adjust` | `inventory:write` |
 | `GET` | `/inventory/locations` | `inventory:read` |
+| `GET` | `/inventory/items` | `inventory:read` / `prescription:write` |
 | `GET` | `/inventory/alerts` | `inventory:read` |
 | `PATCH` | `/inventory/alerts/:alertId` | `inventory:write` |
 | `POST` | `/inventory/dispense` | `prescription:dispense` |
@@ -389,7 +392,9 @@ quantity. Plain FIFO leaves short-dated stock on the shelf to expire.
 | Method | Path | Permission |
 |---|---|---|
 | `POST` | `/billing/invoices` | `invoice:write` |
+| `GET` | `/billing/service-items` | `invoice:read` / `invoice:write` |
 | `GET` | `/billing/invoices` | `invoice:read` |
+| `GET` | `/billing/invoices/:id` | `invoice:read` |
 | `POST` | `/billing/payments` | `payment:write` |
 | `POST` | `/billing/claims` | `claim:write` |
 
