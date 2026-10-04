@@ -12,7 +12,7 @@ import { booleanish } from '../../utils/schema.js';
 import type { NextFunction, Request, Response } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { requirePermission, requireStaffAccount } from '../../middleware/authorize.js';
-import { body, queryParams, validate } from '../../middleware/validate.js';
+import { body, param, queryParams, validate } from '../../middleware/validate.js';
 import { runInTenant, runInTenantReadOnly } from '../../middleware/tenant.js';
 import { assertPatientAccess } from '../../security/rbac.js';
 import { AppError, NotFoundError } from '../../utils/errors.js';
@@ -116,7 +116,12 @@ billingRoutes.post(
                                  facility_id, issued_on, due_on, status, billing_stage,
                                  primary_policy_id, notes, created_by)
            VALUES ($1, hims_util.allocate_reference($1, 'invoice', 'INV'), $2, $3, $4,
-                   $5, CURRENT_DATE, CURRENT_DATE + $6, 'draft',
+                   -- The ::int cast is required. "date + unknown" is ambiguous
+                   -- to the planner, which can read an untyped parameter as
+                   -- either a day count or an interval, so it refuses with
+                   -- 42725 rather than guessing — and it refuses at execution
+                   -- time, which is why this only ever surfaced on a real call.
+                   $5, CURRENT_DATE, CURRENT_DATE + $6::int, 'draft',
                    CASE WHEN $7::uuid IS NULL THEN 'patient_responsibility' ELSE 'ready_to_bill' END,
                    $7, $8, $9)
            RETURNING id, invoice_number`,
@@ -358,6 +363,137 @@ billingRoutes.get(
  * the outstanding balance, so a mis-keyed receipt cannot drive the balance
  * negative and report the invoice as paid. That error surfaces here as a 409.
  */
+/**
+ * The service catalogue.
+ *
+ * An invoice line can be typed freehand, but a line chosen from the catalogue
+ * carries its CPT code and its price — and the price is what gets snapshotted
+ * onto the invoice. Billing without this list means every line is typed from
+ * memory, which is how a consultation gets billed at three different prices in
+ * one week.
+ */
+billingRoutes.get(
+  '/service-items',
+  requirePermission('invoice:read', 'invoice:write'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const search = typeof req.query.q === 'string' ? req.query.q : null;
+
+      const data = await runInTenantReadOnly(req, async ({ db }) => {
+        const { rows } = await db.query<Record<string, unknown>>(
+          `SELECT id, code, name, category, cpt_code, unit_price_cents, tax_rate, is_active
+             FROM service_items
+            WHERE is_active
+              AND ($1::text IS NULL OR name ILIKE '%' || $1 || '%' OR code ILIKE '%' || $1 || '%')
+            ORDER BY category, name
+            LIMIT 200`,
+          [search],
+        );
+
+        return rows;
+      });
+
+      res.json({ data });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * One invoice, with everything needed to act on it.
+ *
+ * The lines, the payments already allocated against it, the claims raised from
+ * it, and the patient's active policies — because the two things anyone opens
+ * an invoice to do are take money and raise a claim, and both need data the
+ * list endpoint does not carry.
+ */
+billingRoutes.get(
+  '/invoices/:invoiceId',
+  requirePermission('invoice:read'),
+  validate({ params: z.object({ invoiceId: z.string().uuid() }) }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const invoiceId = param(req, 'invoiceId');
+
+      const data = await runInTenantReadOnly(req, async ({ db }, collect) => {
+        const { rows } = await db.query<Record<string, unknown>>(
+          `SELECT i.id, i.invoice_number, i.patient_id, i.encounter_id, i.appointment_id,
+                  i.currency, i.issued_on, i.due_on, i.status, i.billing_stage,
+                  i.subtotal_cents, i.discount_cents, i.tax_cents, i.total_cents,
+                  i.amount_paid_cents, i.balance_cents, i.notes,
+                  p.full_name AS patient_name, p.mrn,
+                  GREATEST(0, CURRENT_DATE - i.due_on) AS days_overdue
+             FROM invoices i
+             JOIN patients p ON p.id = i.patient_id
+            WHERE i.id = $1`,
+          [invoiceId],
+        );
+
+        const invoice = rows[0];
+        if (!invoice) throw new NotFoundError('invoice');
+
+        const [{ rows: lines }, { rows: payments }, { rows: claims }, { rows: policies }] =
+          await Promise.all([
+            db.query<Record<string, unknown>>(
+              `SELECT l.id, l.line_no, l.description, l.cpt_code, l.quantity,
+                      l.unit_price_cents, l.discount_cents, l.gross_cents, l.net_cents,
+                      l.tax_cents, l.diagnosis_codes, si.category
+                 FROM invoice_lines l
+                 LEFT JOIN service_items si ON si.id = l.service_item_id
+                WHERE l.invoice_id = $1
+                ORDER BY l.line_no`,
+              [invoiceId],
+            ),
+            db.query<Record<string, unknown>>(
+              `SELECT pay.id, pay.receipt_number, pay.amount_cents, pay.method, pay.payer_kind,
+                      pay.received_at, pay.status, alloc.amount_cents AS allocated_cents
+                 FROM payment_allocations alloc
+                 JOIN payments pay ON pay.id = alloc.payment_id
+                WHERE alloc.invoice_id = $1
+                ORDER BY pay.received_at DESC`,
+              [invoiceId],
+            ),
+            db.query<Record<string, unknown>>(
+              `SELECT c.id, c.claim_number, c.status, c.claimed_cents, c.paid_cents,
+                      c.denied_cents, c.submitted_at, c.adjudicated_at, c.denial_codes,
+                      payer.name AS payer_name
+                 FROM insurance_claims c
+                 LEFT JOIN insurance_payers payer ON payer.id = c.payer_id
+                WHERE c.invoice_id = $1
+                ORDER BY c.submitted_at DESC NULLS LAST`,
+              [invoiceId],
+            ),
+            db.query<Record<string, unknown>>(
+              `SELECT pol.id, pol.plan_name, pol.precedence, pol.member_number_last4,
+                      pol.copay_cents, pol.coinsurance_rate, pol.verification_status,
+                      payer.name AS payer_name
+                 FROM patient_insurance_policies pol
+                 JOIN insurance_payers payer ON payer.id = pol.payer_id
+                WHERE pol.patient_id = $1 AND pol.is_active
+                ORDER BY pol.precedence`,
+              [invoice.patient_id],
+            ),
+          ]);
+
+        collect({
+          action: 'invoice.read',
+          resourceType: 'invoice',
+          resourceId: invoiceId,
+          patientId: invoice.patient_id as string,
+          touchedPhi: true,
+        });
+
+        return { ...invoice, lines, payments, claims, policies };
+      });
+
+      res.json({ data });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 billingRoutes.post(
   '/payments',
   requirePermission('payment:write'),

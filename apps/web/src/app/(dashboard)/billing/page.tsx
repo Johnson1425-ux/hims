@@ -11,6 +11,8 @@
  * "what did we bill" but "what is old and who owes it".
  */
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/layout/shell';
 import {
   Badge,
@@ -28,8 +30,16 @@ import {
 } from '@/components/ui/primitives';
 import { AgeingBar } from '@/components/charts/ageing-bar';
 import { useSession } from '@/lib/session';
-import { api, ApiError, type InvoiceListItem } from '@/lib/api';
-import { formatDate, formatMoney, humanise } from '@/lib/format';
+import {
+  api,
+  ApiError,
+  type InvoiceListItem,
+  type PatientSummary,
+  type ServiceItem,
+} from '@/lib/api';
+import { Field, FormDialog, Select, useFormErrors } from '@/components/ui/forms';
+import { PatientPicker } from '@/components/ui/patient-picker';
+import { formatDate, formatMoney, formatNumber, humanise } from '@/lib/format';
 import { IconReceipt } from '@/components/layout/icons';
 
 const STATUS_TONE: Record<string, Tone> = {
@@ -48,7 +58,14 @@ export default function BillingPage() {
   const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
   const [ageing, setAgeing] = useState<Record<string, { totalCents: number; count: number }>>({});
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [raising, setRaising] = useState(false);
+  const [invoicePatient, setInvoicePatient] = useState<PatientSummary | null>(null);
+  const [services, setServices] = useState<ServiceItem[]>([]);
+  const [draftLines, setDraftLines] = useState<Array<{ key: string; serviceItemId: string; quantity: string }>>([]);
+  const [dueInDays, setDueInDays] = useState('30');
+  const newInvoiceForm = useFormErrors();
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -69,6 +86,49 @@ export default function BillingPage() {
     }
   }, [overdueOnly]);
 
+  // The catalogue is small and changes rarely, so it is fetched once rather
+  // than per keystroke: a line chosen from it carries its CPT code and the
+  // price that gets snapshotted onto the invoice.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void api
+      .get<ServiceItem[]>('/billing/service-items', undefined, controller.signal)
+      .then(({ data }) => setServices(data))
+      .catch(() => undefined);
+
+    return () => controller.abort();
+  }, []);
+
+  async function raiseInvoice(): Promise<void> {
+    if (!invoicePatient) return;
+    newInvoiceForm.reset();
+
+    try {
+      const { data } = await api.post<{ id: string }>('/billing/invoices', {
+        patientId: invoicePatient.id,
+        dueInDays: Number(dueInDays),
+        lines: draftLines
+          .filter((line) => line.serviceItemId)
+          .map((line) => {
+            const service = services.find((s) => s.id === line.serviceItemId)!;
+            return {
+              serviceItemId: service.id,
+              description: service.name,
+              cptCode: service.cpt_code ?? undefined,
+              quantity: Number(line.quantity) || 1,
+              sourceKind: 'manual',
+            };
+          }),
+      });
+
+      setRaising(false);
+      router.push(`/billing/${data.id}`);
+    } catch (caught) {
+      newInvoiceForm.capture(caught);
+    }
+  }
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -84,7 +144,16 @@ export default function BillingPage() {
         subtitle="Invoices, payments and insurance claims"
         actions={
           can('invoice:write') ? (
-            <Button variant="primary" icon={<IconReceipt />}>
+            <Button
+              variant="primary"
+              icon={<IconReceipt />}
+              onClick={() => {
+                setInvoicePatient(null);
+                setDraftLines([]);
+                newInvoiceForm.reset();
+                setRaising(true);
+              }}
+            >
               New invoice
             </Button>
           ) : null
@@ -168,7 +237,9 @@ export default function BillingPage() {
                   {invoices.map((invoice) => (
                     <Tr key={invoice.id}>
                       <Td numeric className="font-medium whitespace-nowrap">
-                        {invoice.invoice_number}
+                        <Link href={`/billing/${invoice.id}`} style={{ color: 'var(--accent)' }}>
+                          {invoice.invoice_number}
+                        </Link>
                       </Td>
                       <Td>
                         <span className="block truncate">{invoice.patient_name}</span>
@@ -209,6 +280,133 @@ export default function BillingPage() {
           )}
         </Card>
       </div>
+
+      <FormDialog
+        open={raising}
+        onClose={() => setRaising(false)}
+        title="New invoice"
+        description="Prices are taken from the catalogue and snapshotted onto the invoice"
+        submitLabel="Raise the invoice"
+        message={newInvoiceForm.message}
+        width="44rem"
+        disabled={!invoicePatient || draftLines.filter((l) => l.serviceItemId).length === 0}
+        onSubmit={raiseInvoice}
+      >
+        <PatientPicker
+          value={invoicePatient}
+          onChange={setInvoicePatient}
+          error={newInvoiceForm.errors.patientId}
+          autoFocus
+        />
+
+        <div className="flex flex-col gap-3">
+          <span className="text-[0.8125rem] font-medium" style={{ color: 'var(--ink-secondary)' }}>
+            Lines
+          </span>
+
+          {draftLines.map((line, index) => {
+            const service = services.find((s) => s.id === line.serviceItemId);
+
+            return (
+              <div key={line.key} className="flex items-end gap-2">
+                <div className="min-w-0 flex-1">
+                  <Select
+                    name={`service-${line.key}`}
+                    label={index === 0 ? 'Service' : undefined}
+                    placeholder="Choose a service"
+                    options={services.map((s) => ({
+                      value: s.id,
+                      label: `${s.name} — ${formatMoney(s.unit_price_cents)}`,
+                    }))}
+                    value={line.serviceItemId}
+                    onChange={(event) =>
+                      setDraftLines((current) =>
+                        current.map((l) =>
+                          l.key === line.key ? { ...l, serviceItemId: event.target.value } : l,
+                        ),
+                      )
+                    }
+                  />
+                </div>
+                <div className="w-20 shrink-0">
+                  <Field
+                    name={`qty-${line.key}`}
+                    label={index === 0 ? 'Qty' : undefined}
+                    type="number"
+                    min={1}
+                    value={line.quantity}
+                    onChange={(event) =>
+                      setDraftLines((current) =>
+                        current.map((l) => (l.key === line.key ? { ...l, quantity: event.target.value } : l)),
+                      )
+                    }
+                  />
+                </div>
+                <div className="w-24 shrink-0 pb-2 text-right">
+                  <span className="tabular text-[0.875rem]" style={{ color: 'var(--ink)' }}>
+                    {service ? formatMoney(service.unit_price_cents * (Number(line.quantity) || 1)) : '—'}
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="mb-1"
+                  onClick={() => setDraftLines((current) => current.filter((l) => l.key !== line.key))}
+                >
+                  Remove
+                </Button>
+              </div>
+            );
+          })}
+
+          <div>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() =>
+                setDraftLines((current) => [
+                  ...current,
+                  { key: Math.random().toString(36).slice(2), serviceItemId: '', quantity: '1' },
+                ])
+              }
+            >
+              Add a line
+            </Button>
+          </div>
+
+          {draftLines.filter((l) => l.serviceItemId).length > 0 ? (
+            <div
+              className="flex items-center justify-between rounded-[var(--radius-md)] p-3"
+              style={{ background: 'var(--surface-sunken)' }}
+            >
+              <span className="text-[0.875rem]" style={{ color: 'var(--ink-secondary)' }}>
+                {formatNumber(draftLines.filter((l) => l.serviceItemId).length)} line(s)
+              </span>
+              <span className="tabular text-[1rem] font-semibold" style={{ color: 'var(--ink)' }}>
+                {formatMoney(
+                  draftLines.reduce((sum, line) => {
+                    const service = services.find((s) => s.id === line.serviceItemId);
+                    return sum + (service ? service.unit_price_cents * (Number(line.quantity) || 1) : 0);
+                  }, 0),
+                )}
+              </span>
+            </div>
+          ) : null}
+        </div>
+
+        <Field
+          name="dueInDays"
+          label="Payment terms (days)"
+          type="number"
+          min={0}
+          max={365}
+          hint="Drives the ageing buckets and the overdue flag."
+          value={dueInDays}
+          error={newInvoiceForm.errors.dueInDays}
+          onChange={(event) => setDueInDays(event.target.value)}
+        />
+      </FormDialog>
     </>
   );
 }

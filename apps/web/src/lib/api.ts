@@ -703,3 +703,83 @@ export interface StockAlert {
   location_name: string;
   preferred_supplier: string | null;
 }
+
+export interface ServiceItem {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  cpt_code: string | null;
+  unit_price_cents: number;
+  tax_rate: string;
+  is_active: boolean;
+}
+
+export interface InvoiceDetail {
+  id: string;
+  invoice_number: string;
+  patient_id: string;
+  patient_name: string;
+  mrn: string;
+  encounter_id: string | null;
+  appointment_id: string | null;
+  currency: string;
+  issued_on: string;
+  due_on: string | null;
+  status: string;
+  billing_stage: string;
+  subtotal_cents: number;
+  discount_cents: number;
+  tax_cents: number;
+  total_cents: number;
+  amount_paid_cents: number;
+  balance_cents: number;
+  notes: string | null;
+  days_overdue: number;
+  lines: Array<{
+    id: string;
+    line_no: number;
+    description: string;
+    cpt_code: string | null;
+    quantity: string;
+    unit_price_cents: number;
+    discount_cents: number;
+    gross_cents: number;
+    net_cents: number;
+    tax_cents: number;
+    diagnosis_codes: string[] | null;
+    category: string | null;
+  }>;
+  payments: Array<{
+    id: string;
+    receipt_number: string;
+    amount_cents: number;
+    allocated_cents: number;
+    method: string;
+    payer_kind: string;
+    received_at: string;
+    status: string;
+  }>;
+  claims: Array<{
+    id: string;
+    claim_number: string;
+    status: string;
+    claimed_cents: number;
+    paid_cents: number | null;
+    denied_cents: number | null;
+    submitted_at: string | null;
+    adjudicated_at: string | null;
+    denial_codes: Array<{ code: string; description: string }> | null;
+    payer_name: string | null;
+  }>;
+  policies: Array<{
+    id: string;
+    plan_name: string | null;
+    precedence: number;
+    member_number_last4: string | null;
+    copay_cents: number | null;
+    coinsurance_rate: string | null;
+    verification_status: string;
+    payer_name: string;
+  }>;
+}
