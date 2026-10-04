@@ -363,14 +363,32 @@ staffRoutes.put(
           }
         }
 
-        // Existing rules are closed off rather than deleted, so appointments
-        // already booked under the old pattern remain explicable.
+        // Rules that were already in force are CLOSED OFF the day before the
+        // new pattern starts, so an appointment booked under the old one
+        // remains explicable.
+        //
+        // Rules that have not started yet — including ones written earlier
+        // today, which is the common case when a rota is corrected — are
+        // DELETED instead. Closing those would set effective_until to the day
+        // before their own effective_from, which violates
+        // chk_availability_window (effective_until >= effective_from) and
+        // failed the whole request. Nothing was ever booked under a pattern
+        // that never became operative, so there is no history to preserve.
+        await db.query(
+          `DELETE FROM provider_availability
+            WHERE staff_profile_id = $1
+              AND ($2::uuid IS NULL OR facility_id = $2)
+              AND effective_from >= COALESCE($3::date, CURRENT_DATE)`,
+          [staffProfileId, input.facilityId ?? null, input.effectiveFrom ?? null],
+        );
+
         await db.query(
           `UPDATE provider_availability
               SET effective_until = COALESCE($3::date, CURRENT_DATE) - 1
             WHERE staff_profile_id = $1
               AND ($2::uuid IS NULL OR facility_id = $2)
-              AND (effective_until IS NULL OR effective_until >= CURRENT_DATE)`,
+              AND effective_from < COALESCE($3::date, CURRENT_DATE)
+              AND (effective_until IS NULL OR effective_until >= COALESCE($3::date, CURRENT_DATE))`,
           [staffProfileId, input.facilityId ?? null, input.effectiveFrom ?? null],
         );
 
