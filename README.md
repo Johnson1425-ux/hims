@@ -285,6 +285,37 @@ cd apps/web
 node scripts/check-csp.mjs http://localhost:3000 development
 ```
 
+**`permission denied for schema public` from `pnpm db:migrate`**
+
+The `hims` database is owned by someone other than `hims_owner` — usually
+because a first `db:create` run could not create the roles, so the database was
+created without an `OWNER` clause and every later run reported "already exists"
+over it.
+
+It matters because PostgreSQL 15 stopped granting `CREATE` on `public` to
+`PUBLIC`, and made schema `public` owned by `pg_database_owner`. Migrations
+need `CREATE` on schema `public` for its tables *and* `CREATE` on the database
+itself — that is what lets a non-superuser install the four *trusted*
+extensions `0001` needs. Both follow from one fact: who owns the database.
+
+Re-run `pnpm db:create`. It now reassigns the owner, and reports it:
+
+```
+  database hims        already exists   (re-run with --drop to recreate)
+  owner    hims        postgres -> hims_owner (reassigned)
+```
+
+If the connecting user is not a superuser it cannot reassign, so it says so,
+prints the statement to run, and exits non-zero rather than leaving
+`db:migrate` to discover it:
+
+```sql
+ALTER DATABASE hims OWNER TO hims_owner;
+```
+
+Its verification step also now checks that `hims_owner` can actually *create*
+objects, not merely log in.
+
 **The API refuses to boot.** It validates configuration on startup and exits
 rather than running unsafely — placeholder encryption keys, `MASTER_KEY` equal
 to `BLIND_INDEX_KEY`, or the two JWT secrets matching will all stop it. The

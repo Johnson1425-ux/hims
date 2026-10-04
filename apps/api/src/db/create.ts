@@ -46,6 +46,9 @@ const CONTAINER = 'hims-postgres';
 const URL_VARS = ['DATABASE_ADMIN_URL', 'DATABASE_URL', 'DATABASE_MIGRATION_URL'] as const;
 const DEV_PASSWORD = process.env.DATABASE_DEV_PASSWORD ?? 'dev-only-password';
 
+/** Owns the schema; migrations connect as this, so it must own the database. */
+const OWNER_ROLE = 'hims_owner';
+
 const ROLES = [
   { name: 'hims_owner', attrs: '', note: 'owns the schema; migrations run as this' },
   { name: 'hims_app', attrs: '', note: 'the API; no bypassrls, so RLS applies' },
@@ -254,12 +257,44 @@ async function verifyClientUrls(): Promise<boolean> {
 
     try {
       await client.connect();
-      const { rows } = await client.query<{ who: string; db: string }>(
-        'SELECT current_user AS who, current_database() AS db',
+      // Logging in is not the same as being able to work. The migration role
+      // additionally needs CREATE on the database (for the trusted extensions
+      // 0001 installs) and CREATE on schema public, and asking the server
+      // directly beats discovering it from db:migrate's first statement.
+      const { rows } = await client.query<{
+        who: string;
+        db: string;
+        can_create_db: boolean;
+        can_create_public: boolean;
+      }>(
+        `SELECT current_user AS who,
+                current_database() AS db,
+                has_database_privilege(current_database(), 'CREATE') AS can_create_db,
+                has_schema_privilege('public', 'CREATE') AS can_create_public`,
       );
       await client.end();
       checked.push(name);
-      log(`  ${name.padEnd(24)} connects as ${rows[0]!.who} to ${rows[0]!.db}`);
+
+      const row = rows[0]!;
+      log(`  ${name.padEnd(24)} connects as ${row.who} to ${row.db}`);
+
+      if (name === 'DATABASE_MIGRATION_URL' && !(row.can_create_db && row.can_create_public)) {
+        allGood = false;
+        const missing = [
+          row.can_create_db ? null : `CREATE on database ${row.db}`,
+          row.can_create_public ? null : 'CREATE on schema public',
+        ].filter(Boolean);
+        log('');
+        log(`       ${row.who} can log in but cannot create objects: missing`);
+        log(`       ${missing.join(' and ')}.`);
+        log('');
+        log(`       db:migrate would fail on its first statement. ${row.db} is owned`);
+        log('       by someone else, and PostgreSQL 15 grants neither privilege to');
+        log('       PUBLIC. A superuser can fix it with:');
+        log('');
+        log(`         ALTER DATABASE ${row.db} OWNER TO ${OWNER_ROLE};`);
+        log('');
+      }
     } catch (error) {
       await client.end().catch(() => undefined);
       allGood = false;
@@ -686,6 +721,51 @@ async function main(): Promise<void> {
       log(`  database ${DB_NAME.padEnd(11)} already exists   (re-run with --drop to recreate)`);
     }
 
+    // ---- Ownership ---------------------------------------------------------
+    // Migrations need CREATE on the database — that is what lets a non-
+    // superuser install a *trusted* extension, and 0001 installs four — and
+    // CREATE on schema public. PostgreSQL 15 grants neither to PUBLIC any
+    // more, and it made schema public owned by pg_database_owner, so both
+    // follow from one fact: who owns the database.
+    //
+    // The OWNER clause above only applies when the database is CREATED, and
+    // only if hims_owner existed at that moment. A first run that could not
+    // create roles therefore leaves a database owned by the bootstrap
+    // superuser, and every later run says "already exists" over it — which is
+    // how `permission denied for schema public` ends up surfacing from
+    // db:migrate instead of from here. Reassigning is additive and reversible,
+    // and it converges the database on the state this command is supposed to
+    // produce.
+    const { rows: ownerRows } = await client.query<{ owner: string }>(
+      'SELECT pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname = $1',
+      [DB_NAME],
+    );
+    const currentOwner = ownerRows[0]?.owner;
+    const { rowCount: ownerRoleExists } = await client.query(
+      'SELECT 1 FROM pg_roles WHERE rolname = $1',
+      [OWNER_ROLE],
+    );
+
+    if (currentOwner === OWNER_ROLE) {
+      log(`  owner    ${DB_NAME.padEnd(11)} ${OWNER_ROLE}`);
+    } else if (currentOwner && ownerRoleExists) {
+      try {
+        await client.query(`ALTER DATABASE ${ident(DB_NAME)} OWNER TO ${ident(OWNER_ROLE)}`);
+        log(`  owner    ${DB_NAME.padEnd(11)} ${currentOwner} -> ${OWNER_ROLE} (reassigned)`);
+      } catch (error) {
+        if ((error as { code?: string }).code !== '42501') throw error;
+        log(`  owner    ${DB_NAME.padEnd(11)} ${currentOwner} — CANNOT REASSIGN`);
+        log('');
+        log(`       Migrations run as ${OWNER_ROLE} and will fail with "permission`);
+        log('       denied for schema public" against a database owned by someone');
+        log('       else. The connecting user cannot change it, so a superuser');
+        log('       needs to run:');
+        log('');
+        log(`         ALTER DATABASE ${DB_NAME} OWNER TO ${OWNER_ROLE};`);
+        log('');
+      }
+    }
+
     for (const role of ROLES) {
       await client
         .query(`GRANT CONNECT ON DATABASE ${ident(DB_NAME)} TO ${ident(role.name)}`)
@@ -702,9 +782,10 @@ async function main(): Promise<void> {
   const credentialsWork = await verifyClientUrls();
 
   if (!credentialsWork) {
-    log('\nThe database exists, but at least one configured credential does not work,');
-    log('so `pnpm db:migrate` would fail. Fix the URL above and re-run this command —');
-    log('it is idempotent, and it resets the roles from DATABASE_DEV_PASSWORD each run.\n');
+    log('\nThe database exists, but it is not yet usable by the application, so');
+    log('`pnpm db:migrate` would fail. Fix what is reported above and re-run this');
+    log('command — it is idempotent: it resets the roles from DATABASE_DEV_PASSWORD');
+    log('and reassigns the database owner on every local run.\n');
     process.exit(1);
   }
 
