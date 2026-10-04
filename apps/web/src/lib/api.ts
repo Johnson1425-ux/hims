@@ -783,3 +783,40 @@ export interface InvoiceDetail {
     payer_name: string;
   }>;
 }
+
+export interface EncounterTimelineEntry {
+  id: string;
+  reference: string;
+  startedAt: string;
+  endedAt: string | null;
+  encounterClass: string;
+  status: string;
+  chiefComplaint: string | null;
+  providerName: string;
+  subjective: string | null;
+  objective: string | null;
+  assessment: string | null;
+  plan: string | null;
+  diagnosisCodes: CodedTerm[];
+  amendmentCount: number;
+}
+
+export interface PatientPrescription {
+  id: string;
+  reference: string;
+  prescribed_at: string;
+  status: string;
+  valid_until: string | null;
+  prescriber_name: string;
+  items: Array<{
+    medicationName: string;
+    strength: string | null;
+    route: string;
+    instructions: string;
+    quantityPrescribed: string;
+    quantityDispensed: string;
+    refillsAuthorised: number;
+    refillsUsed: number;
+    status: string;
+  }>;
+}
