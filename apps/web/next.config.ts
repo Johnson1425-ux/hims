@@ -1,7 +1,5 @@
 import type { NextConfig } from 'next';
 
-const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
-
 const config: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -21,23 +19,12 @@ const config: NextConfig = {
             key: 'Permissions-Policy',
             value: 'geolocation=(), microphone=(), camera=(), payment=()',
           },
-          {
-            key: 'Content-Security-Policy',
-            value: [
-              "default-src 'self'",
-              // Next injects inline hydration scripts; 'unsafe-inline' is
-              // scoped to scripts only and should be replaced with a nonce in
-              // production via middleware.
-              "script-src 'self' 'unsafe-inline'",
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: blob:",
-              "font-src 'self'",
-              `connect-src 'self' ${apiBase}`,
-              "frame-ancestors 'none'",
-              "base-uri 'none'",
-              "form-action 'self'",
-            ].join('; '),
-          },
+          // Content-Security-Policy is NOT here. The production policy carries a
+          // per-response nonce, which a static header cannot, so it is built in
+          // src/middleware.ts. Setting one here too would ship two CSP headers,
+          // and a browser enforces the intersection of both — the strictest
+          // reading of each directive — which breaks the page in ways that look
+          // nothing like a duplicated header.
         ],
       },
     ];

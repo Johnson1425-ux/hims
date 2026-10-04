@@ -24,6 +24,11 @@ const STORAGE_KEY = 'hims.theme';
 export function ThemeProvider({ children }: { children: ReactNode }): ReactNode {
   const [theme, setThemeState] = useState<Theme>('system');
   const [resolved, setResolved] = useState<'light' | 'dark'>('light');
+  // The stored choice cannot be read during render without risking a
+  // hydration mismatch, so the first render necessarily says 'system' —
+  // which is NOT yet a statement about what the viewer chose. Until storage
+  // has been read, this provider must leave the DOM alone.
+  const [storageRead, setStorageRead] = useState(false);
 
   useEffect(() => {
     let stored: Theme = 'system';
@@ -36,9 +41,15 @@ export function ThemeProvider({ children }: { children: ReactNode }): ReactNode 
     }
 
     setThemeState(stored);
+    setStorageRead(true);
   }, []);
 
   useEffect(() => {
+    // Acting on the placeholder 'system' would call removeAttribute and undo
+    // what the pre-paint script in the root layout set one frame earlier —
+    // reintroducing exactly the flash that script exists to prevent.
+    if (!storageRead) return;
+
     const media = window.matchMedia('(prefers-color-scheme: dark)');
 
     const apply = () => {
@@ -56,7 +67,7 @@ export function ThemeProvider({ children }: { children: ReactNode }): ReactNode 
     apply();
     media.addEventListener('change', apply);
     return () => media.removeEventListener('change', apply);
-  }, [theme]);
+  }, [theme, storageRead]);
 
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next);

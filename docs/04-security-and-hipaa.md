@@ -191,8 +191,19 @@ twice.
 
 - `Cache-Control: no-store` on every API response and every page — a shared
   workstation must not serve the previous user's chart from the bfcache.
-- CSP, `frame-ancestors 'none'`, `Referrer-Policy: no-referrer` (a referrer
-  header can leak a patient id to a third party), HSTS in production.
+- CSP is built per request in `apps/web/src/middleware.ts`, not as a static
+  header, because the production policy carries a per-response nonce:
+  `script-src 'self' 'nonce-…' 'strict-dynamic'`, with no `'unsafe-inline'`.
+  Allowing inline script is close to making the policy decorative, since an
+  injected inline `<script>` is the thing it exists to stop. Development is
+  looser by design — React Refresh evaluates module code with `eval()`, so hot
+  reloading cannot work without `'unsafe-eval'` — and the asymmetry is asserted
+  in both directions by `apps/web/scripts/check-csp.mjs`, because a dev
+  convenience left in the production policy is invisible: the page works
+  either way.
+- `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'none'`,
+  `Referrer-Policy: no-referrer` (a referrer header can leak a patient id to a
+  third party), HSTS in production.
 - CORS is an explicit allowlist; the config refuses to boot in production with a
   wildcard or a plaintext origin.
 - The logger redacts credentials, direct identifiers and clinical narrative by
@@ -221,6 +232,10 @@ Named rather than silently absent:
 ```bash
 pnpm db:verify                               # checksums, RLS coverage, audit chain
 psql -d hims_check -f apps/api/seeds/verify_invariants.sql   # 34 invariants
+
+# the browser policy, against a running server (web/)
+node scripts/check-csp.mjs http://localhost:3000 development
+node scripts/check-csp.mjs http://localhost:3000 production
 ```
 
 The suite asserts, among others: cross-tenant SELECT/INSERT/UPDATE/DELETE are

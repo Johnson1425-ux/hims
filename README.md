@@ -227,6 +227,25 @@ If one of those fails it exits non-zero and names the credential, so
 next step. Passwords are left alone when `DATABASE_ADMIN_URL` is not local —
 resetting one on a shared server is not this command's business.
 
+**The login form does nothing, and the console shows `EvalError: Evaluating a
+string as JavaScript violates the following Content Security Policy directive`**
+
+The dev server's Content-Security-Policy was blocking React Refresh, which
+evaluates module code with `eval()`. That error is thrown at the top level of
+`main-app.js`, so module evaluation aborts, React never mounts, and every page
+is inert markup — the login form included. It looks like a broken login and is
+really a broken bundle.
+
+Fixed: the policy is now built per request in `apps/web/src/middleware.ts` and
+differs by mode — `'unsafe-eval'` in development so hot reloading works, a
+per-response nonce in production with no `'unsafe-inline'` at all. Check either
+against a running server:
+
+```bash
+cd apps/web
+node scripts/check-csp.mjs http://localhost:3000 development
+```
+
 **The API refuses to boot.** It validates configuration on startup and exits
 rather than running unsafely — placeholder encryption keys, `MASTER_KEY` equal
 to `BLIND_INDEX_KEY`, or the two JWT secrets matching will all stop it. The

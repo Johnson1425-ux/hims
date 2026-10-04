@@ -1,3 +1,4 @@
+import { headers } from 'next/headers';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { SessionProvider } from '@/lib/session';
@@ -28,7 +29,17 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: ReactNode }): ReactNode {
+export default async function RootLayout({
+  children,
+}: {
+  children: ReactNode;
+}): Promise<ReactNode> {
+  // Set by src/middleware.ts, and present in production only: the development
+  // policy allows inline scripts outright, because hot reloading injects some
+  // that cannot be nonced. Reading a header makes every route dynamic, which
+  // costs nothing here — every page is already no-store and session-scoped.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -38,6 +49,7 @@ export default function RootLayout({ children }: { children: ReactNode }): React
           a ward at night is genuinely unpleasant.
         */}
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var t=localStorage.getItem('hims.theme');if(t==='dark'||t==='light'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();`,
           }}
