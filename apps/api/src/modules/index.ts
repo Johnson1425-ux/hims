@@ -14,6 +14,7 @@ import { clinicalRoutes } from './clinical/routes.js';
 import { prescriptionRoutes } from './prescriptions/routes.js';
 import { billingRoutes } from './billing/routes.js';
 import { staffRoutes } from './staff/routes.js';
+import { notificationRoutes } from './notifications/routes.js';
 import { reportRoutes } from './reports/routes.js';
 import { tenantRoutes } from './tenants/routes.js';
 
@@ -27,5 +28,6 @@ apiRouter.use('/prescriptions', prescriptionRoutes);
 apiRouter.use('/billing', billingRoutes);
 apiRouter.use('/inventory', inventoryRoutes);
 apiRouter.use('/staff', staffRoutes);
+apiRouter.use('/notifications', notificationRoutes);
 apiRouter.use('/reports', reportRoutes);
 apiRouter.use('/tenant', tenantRoutes);

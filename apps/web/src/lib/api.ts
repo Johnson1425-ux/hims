@@ -831,3 +831,16 @@ export interface AccessLogEntry {
   access_basis: string | null;
   ip_address: string | null;
 }
+
+export interface AppNotification {
+  id: string;
+  category: string;
+  priority: number;
+  subject: string | null;
+  body: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+  read_at: string | null;
+  related_kind: string | null;
+  related_id: string | null;
+}

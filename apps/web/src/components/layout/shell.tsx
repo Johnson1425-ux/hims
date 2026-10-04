@@ -286,6 +286,25 @@ export function AppShell({ children }: { children: ReactNode }): ReactNode {
  * ======================================================================== */
 
 function TopBar({ onOpenNav }: { onOpenNav: () => void }): ReactNode {
+  const [unread, setUnread] = useState(0);
+  const here = usePathname();
+
+  // Polled rather than pushed: a websocket for a badge is a lot of moving
+  // parts for a number that is allowed to be a minute stale. Anything urgent
+  // also raises an alert on the screen it belongs to, which is where someone
+  // working would actually see it.
+  useEffect(() => {
+    const read = () =>
+      void api
+        .get<unknown[]>('/notifications', { unreadOnly: 'true', limit: 1 })
+        .then(({ meta }) => setUnread(Number((meta as { unread?: number })?.unread ?? 0)))
+        .catch(() => undefined);
+
+    read();
+    const timer = window.setInterval(read, 60_000);
+    return () => window.clearInterval(timer);
+  }, [here]);
+
   const { theme, resolved, setTheme } = useTheme();
   const { canAny } = useSession();
   const [query, setQuery] = useState('');
@@ -471,13 +490,22 @@ function TopBar({ onOpenNav }: { onOpenNav: () => void }): ReactNode {
         </button>
 
         <Link
-          href="/dashboard"
-          aria-label="Notifications"
+          href="/notifications"
+          aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
           title="Notifications"
-          className="rounded-[var(--radius-md)] p-2 transition-colors hover:[background:var(--surface-hover)]"
+          className="relative rounded-[var(--radius-md)] p-2 transition-colors hover:[background:var(--surface-hover)]"
           style={{ color: 'var(--ink-secondary)' }}
         >
           <IconBell />
+          {unread > 0 ? (
+            <span
+              aria-hidden="true"
+              className="tabular absolute top-0.5 right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-bold"
+              style={{ background: 'var(--critical)', color: 'var(--ink-on-brand)' }}
+            >
+              {unread > 9 ? '9+' : unread}
+            </span>
+          ) : null}
         </Link>
 
         <span

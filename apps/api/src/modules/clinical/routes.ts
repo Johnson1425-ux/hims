@@ -783,16 +783,37 @@ clinicalRoutes.post(
           ],
         );
 
-        // A deteriorating patient needs a person told, not a row written.
+        // A deteriorating patient needs a PERSON told, not a row written — so
+        // the notification is addressed. An unaddressed alert sits in a table
+        // nobody's inbox points at, which is the same as not raising one.
+        //
+        // The recipient is the clinician responsible: whoever is running the
+        // encounter, falling back to the patient's primary clinician. Both
+        // resolve to a user, because a notification addressed to a staff
+        // profile cannot be shown to anyone signing in.
         if (score >= 5) {
+          const { rows: recipients } = await db.query<{ user_id: string }>(
+            `SELECT u.id AS user_id
+               FROM staff_profiles sp
+               JOIN users u ON u.id = sp.user_id
+              WHERE sp.id = COALESCE(
+                      (SELECT provider_id FROM encounters WHERE id = $1),
+                      (SELECT primary_provider_id FROM patients WHERE id = $2))
+              LIMIT 1`,
+            [input.encounterId ?? null, input.patientId],
+          );
+
           await db.query(
-            `INSERT INTO notifications (tenant_id, patient_id, channel, template_key, category,
-                                        priority, subject, body, payload, dedupe_key)
-             VALUES ($1, $2, 'in_app', 'early_warning', 'clinical', 1, $3, $4, $5, $6)
+            `INSERT INTO notifications (tenant_id, user_id, patient_id, channel, template_key,
+                                        category, priority, subject, body, payload,
+                                        related_kind, related_id, dedupe_key)
+             VALUES ($1, $2, $3, 'in_app', 'early_warning', 'clinical', 1, $4, $5, $6,
+                     'patient', $3, $7)
              ON CONFLICT (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL
          DO NOTHING`,
             [
               tenantId,
+              recipients[0]?.user_id ?? null,
               input.patientId,
               'Early warning score requires review',
               `NEWS2 score of ${score} recorded. Urgent clinical review indicated.`,
