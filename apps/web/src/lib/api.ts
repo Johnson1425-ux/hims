@@ -568,3 +568,68 @@ export interface AppointmentType {
   department_id: string | null;
   department_name: string | null;
 }
+
+export interface VitalsReading {
+  id: string;
+  recorded_at: string;
+  temperature_c: string | null;
+  heart_rate_bpm: number | null;
+  respiratory_rate: number | null;
+  systolic_mmhg: number | null;
+  diastolic_mmhg: number | null;
+  oxygen_saturation: string | null;
+  blood_glucose_mmol: string | null;
+  weight_kg: string | null;
+  height_cm: string | null;
+  bmi: string | null;
+  pain_score: number | null;
+  news2_score: number | null;
+  recorded_by_name: string | null;
+}
+
+export interface CodedTerm {
+  system: string;
+  code: string;
+  display: string;
+}
+
+export interface EncounterDetail {
+  id: string;
+  reference: string;
+  patientId: string;
+  patientName: string;
+  mrn: string;
+  dateOfBirth: string;
+  sexAtBirth: string;
+  appointmentId: string | null;
+  providerId: string;
+  providerName: string;
+  departmentName: string | null;
+  encounterClass: string;
+  startedAt: string;
+  endedAt: string | null;
+  chiefComplaint: string | null;
+  subjective: string | null;
+  objective: string | null;
+  assessment: string | null;
+  plan: string | null;
+  diagnosisCodes: CodedTerm[];
+  procedureCodes: CodedTerm[];
+  followUpInDays: number | null;
+  disposition: string | null;
+  status: 'draft' | 'in_progress' | 'pending_signature' | 'signed' | 'amended' | 'voided';
+  signedAt: string | null;
+  signedByName: string | null;
+  requiresCosign: boolean;
+  cosignedAt: string | null;
+  accessBasis: string;
+  vitals: VitalsReading[];
+  amendments: Array<{
+    id: string;
+    sequenceNo: number;
+    createdAt: string;
+    reason: string;
+    amendedByName: string | null;
+    narrative: string | null;
+  }>;
+}

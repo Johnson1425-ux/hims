@@ -229,6 +229,144 @@ clinicalRoutes.get(
   },
 );
 
+/**
+ * One encounter, in full.
+ *
+ * This is the chart, not the board: it decrypts the narrative, so it makes the
+ * per-patient access decision and writes a PHI-read audit entry, exactly as
+ * the patient timeline does. The vitals series and the amendment history come
+ * with it, because a documentation screen that has to fetch them separately
+ * renders a note beside observations that may be a second older.
+ */
+clinicalRoutes.get(
+  '/:encounterId',
+  requirePermission('encounter:read'),
+  validate({ params: encounterIdParam }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const encounterId = param(req, 'encounterId');
+
+      const result = await runInTenantReadOnly(req, async ({ db, tenantId }, collect) => {
+        const { rows } = await db.query<Record<string, unknown>>(
+          `SELECT e.id, e.reference, e.patient_id, e.appointment_id, e.provider_id,
+                  e.facility_id, e.department_id, e.encounter_class, e.started_at, e.ended_at,
+                  e.chief_complaint, e.subjective_encrypted, e.objective_encrypted,
+                  e.assessment_encrypted, e.plan_encrypted, e.diagnosis_codes, e.procedure_codes,
+                  e.follow_up_in_days, e.disposition, e.status, e.signed_at, e.requires_cosign,
+                  e.cosigned_at,
+                  p.full_name AS patient_name, p.mrn, p.date_of_birth, p.sex_at_birth,
+                  sp.display_name AS provider_name,
+                  signer.display_name AS signed_by_name,
+                  d.name AS department_name
+             FROM encounters e
+             JOIN patients p ON p.id = e.patient_id
+             JOIN staff_profiles sp ON sp.id = e.provider_id
+             LEFT JOIN staff_profiles signer ON signer.id = e.signed_by
+             LEFT JOIN departments d ON d.id = e.department_id
+            WHERE e.id = $1`,
+          [encounterId],
+        );
+
+        const row = rows[0];
+        if (!row) throw new NotFoundError('encounter');
+
+        const decision = await assertPatientAccess(db, req.principal!, row.patient_id as string);
+
+        const { rows: keyRows } = await db.query<{ dek_wrapped: Buffer }>(
+          'SELECT dek_wrapped FROM tenants WHERE id = $1',
+          [tenantId],
+        );
+        const cipher = createFieldCipher(tenantId, keyRows[0]!.dek_wrapped);
+        const ctx = (column: string) => ({ table: 'encounters', column, recordId: encounterId });
+
+        const [{ rows: vitals }, { rows: amendments }] = await Promise.all([
+          db.query<Record<string, unknown>>(
+            `SELECT v.id, v.recorded_at, v.temperature_c, v.heart_rate_bpm, v.respiratory_rate,
+                    v.systolic_mmhg, v.diastolic_mmhg, v.oxygen_saturation, v.blood_glucose_mmol,
+                    v.weight_kg, v.height_cm, v.bmi, v.pain_score, v.news2_score,
+                    sp.display_name AS recorded_by_name
+               FROM vital_signs v
+               LEFT JOIN staff_profiles sp ON sp.id = v.recorded_by
+              WHERE v.encounter_id = $1
+              ORDER BY v.recorded_at DESC
+              LIMIT 50`,
+            [encounterId],
+          ),
+          db.query<Record<string, unknown>>(
+            `SELECT a.id, a.sequence_no, a.created_at, a.reason, a.narrative_encrypted,
+                    sp.display_name AS amended_by_name
+               FROM encounter_amendments a
+               LEFT JOIN staff_profiles sp ON sp.id = a.authored_by
+              WHERE a.encounter_id = $1
+              ORDER BY a.sequence_no`,
+            [encounterId],
+          ),
+        ]);
+
+        auditPhiRead(collect, {
+          action: 'encounter.read',
+          resourceType: 'encounter',
+          resourceId: encounterId,
+          patientId: row.patient_id as string,
+          basis: decision.basis,
+        });
+
+        return {
+          id: row.id,
+          reference: row.reference,
+          patientId: row.patient_id,
+          patientName: row.patient_name,
+          mrn: row.mrn,
+          dateOfBirth: row.date_of_birth,
+          sexAtBirth: row.sex_at_birth,
+          appointmentId: row.appointment_id,
+          providerId: row.provider_id,
+          providerName: row.provider_name,
+          departmentName: row.department_name,
+          encounterClass: row.encounter_class,
+          startedAt: (row.started_at as Date).toISOString(),
+          endedAt: (row.ended_at as Date | null)?.toISOString() ?? null,
+          chiefComplaint: row.chief_complaint,
+          subjective: cipher.decrypt(row.subjective_encrypted as Buffer | null, ctx('subjective_encrypted')),
+          objective: cipher.decrypt(row.objective_encrypted as Buffer | null, ctx('objective_encrypted')),
+          assessment: cipher.decrypt(row.assessment_encrypted as Buffer | null, ctx('assessment_encrypted')),
+          plan: cipher.decrypt(row.plan_encrypted as Buffer | null, ctx('plan_encrypted')),
+          diagnosisCodes: row.diagnosis_codes,
+          procedureCodes: row.procedure_codes,
+          followUpInDays: row.follow_up_in_days,
+          disposition: row.disposition,
+          status: row.status,
+          signedAt: (row.signed_at as Date | null)?.toISOString() ?? null,
+          signedByName: row.signed_by_name,
+          requiresCosign: row.requires_cosign,
+          cosignedAt: (row.cosigned_at as Date | null)?.toISOString() ?? null,
+          accessBasis: decision.basis,
+          vitals: vitals.map((v) => ({
+            ...v,
+            recorded_at: (v.recorded_at as Date).toISOString(),
+          })),
+          amendments: amendments.map((a) => ({
+            id: a.id,
+            sequenceNo: a.sequence_no,
+            createdAt: (a.created_at as Date).toISOString(),
+            reason: a.reason,
+            amendedByName: a.amended_by_name,
+            narrative: cipher.decrypt(a.narrative_encrypted as Buffer | null, {
+              table: 'encounter_amendments',
+              column: 'narrative_encrypted',
+              recordId: a.id as string,
+            }),
+          })),
+        };
+      });
+
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 clinicalRoutes.post(
   '/',
   requirePermission('encounter:write'),
@@ -544,21 +682,31 @@ clinicalRoutes.post(
         );
         const cipher = createFieldCipher(tenantId, keyRows[0]!.dek_wrapped);
 
+        // The AAD binds this ciphertext to the amendment's OWN row, which
+        // means the id has to exist before the text is encrypted. Binding it
+        // to the encounter instead would let an amendment's narrative be moved
+        // into a sibling amendment of the same encounter undetected — and the
+        // whole point of authenticating the additional data is that moving
+        // ciphertext between rows fails loudly.
+        const { rows: idRows } = await db.query<{ id: string }>('SELECT gen_random_uuid() AS id');
+        const amendmentId = idRows[0]!.id;
+
         const { rows } = await db.query<{ id: string; sequence_no: number }>(
-          `INSERT INTO encounter_amendments (tenant_id, encounter_id, sequence_no, reason,
+          `INSERT INTO encounter_amendments (id, tenant_id, encounter_id, sequence_no, reason,
                                              narrative_encrypted, authored_by)
-           VALUES ($1, $2,
-                   (SELECT COALESCE(max(sequence_no), 0) + 1 FROM encounter_amendments WHERE encounter_id = $2),
-                   $3, $4, $5)
+           VALUES ($1, $2, $3,
+                   (SELECT COALESCE(max(sequence_no), 0) + 1 FROM encounter_amendments WHERE encounter_id = $3),
+                   $4, $5, $6)
            RETURNING id, sequence_no`,
           [
+            amendmentId,
             tenantId,
             encounterId,
             input.reason,
             cipher.encrypt(input.narrative, {
               table: 'encounter_amendments',
               column: 'narrative_encrypted',
-              recordId: encounterId,
+              recordId: amendmentId,
             }),
             principal.staffProfileId,
           ],

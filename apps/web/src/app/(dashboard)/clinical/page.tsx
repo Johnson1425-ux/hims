@@ -17,6 +17,7 @@
  * access decision and the audit entry belong.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { PageHeader } from '@/components/layout/shell';
 import {
@@ -34,7 +35,10 @@ import {
   type Tone,
 } from '@/components/ui/primitives';
 import { useSession } from '@/lib/session';
-import { api, ApiError, type EncounterWorklistItem } from '@/lib/api';
+import { api, ApiError, type EncounterWorklistItem, type PatientSummary } from '@/lib/api';
+import { FormDialog, Select, Field, useFormErrors } from '@/components/ui/forms';
+import { PatientPicker } from '@/components/ui/patient-picker';
+import { useTenant } from '@/lib/tenant';
 import { formatDateTime, formatRelative, humanise, pluralise } from '@/lib/format';
 import { IconStethoscope, IconChevronRight } from '@/components/layout/icons';
 
@@ -80,11 +84,43 @@ const FILTERS: Array<{ value: Filter; label: string; hint: string }> = [
 
 export default function ClinicalPage() {
   const { can, user } = useSession();
+  const router = useRouter();
+  const { tenant } = useTenant();
   const [items, setItems] = useState<EncounterWorklistItem[]>([]);
   const [filter, setFilter] = useState<Filter>('unsigned');
   const [mine, setMine] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [opening, setOpening] = useState(false);
+  const [newPatient, setNewPatient] = useState<PatientSummary | null>(null);
+  const [newClass, setNewClass] = useState('ambulatory');
+  const [newComplaint, setNewComplaint] = useState('');
+  const [newDepartment, setNewDepartment] = useState('');
+  const openForm = useFormErrors();
+
+  /**
+   * Opening an encounter establishes a care relationship, which is what later
+   * grants this clinician access to the chart without break-glass. It is not a
+   * neutral "create a row" — so it asks who, and why they are here.
+   */
+  async function openEncounter(): Promise<void> {
+    if (!newPatient) return;
+
+    openForm.reset();
+
+    try {
+      const { data } = await api.post<{ id: string }>('/encounters', {
+        patientId: newPatient.id,
+        encounterClass: newClass,
+        chiefComplaint: newComplaint || undefined,
+        departmentId: newDepartment || undefined,
+      });
+      router.push(`/clinical/${data.id}`);
+    } catch (caught) {
+      openForm.capture(caught);
+    }
+  }
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -126,7 +162,9 @@ export default function ClinicalPage() {
         subtitle="Clinical documentation, observations and signing"
         actions={
           can('encounter:write') ? (
-            <Button variant="primary">Open an encounter</Button>
+            <Button variant="primary" onClick={() => setOpening(true)}>
+              Open an encounter
+            </Button>
           ) : null
         }
       />
@@ -330,8 +368,8 @@ export default function ClinicalPage() {
                       </Td>
                       <Td align="right">
                         <Link
-                          href={`/patients/${item.patient_id}`}
-                          aria-label={`Open ${item.patient_name}'s chart`}
+                          href={`/clinical/${item.id}`}
+                          aria-label={`Open ${item.patient_name}'s encounter`}
                           className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)]"
                           style={{ color: 'var(--ink-muted)' }}
                         >
@@ -346,6 +384,57 @@ export default function ClinicalPage() {
           </div>
         )}
       </Card>
+
+      <FormDialog
+        open={opening}
+        onClose={() => setOpening(false)}
+        title="Open an encounter"
+        description="This establishes a care relationship, which is what grants access to the chart"
+        submitLabel="Open and start documenting"
+        message={openForm.message}
+        disabled={newPatient === null}
+        onSubmit={openEncounter}
+      >
+        <PatientPicker
+          value={newPatient}
+          onChange={setNewPatient}
+          error={openForm.errors.patientId}
+          autoFocus
+        />
+        <Select
+          name="encounterClass"
+          label="Setting"
+          options={[
+            { value: 'ambulatory', label: 'Ambulatory — outpatient clinic' },
+            { value: 'emergency', label: 'Emergency' },
+            { value: 'inpatient', label: 'Inpatient' },
+            { value: 'virtual', label: 'Virtual' },
+            { value: 'home', label: 'Home visit' },
+            { value: 'observation', label: 'Observation' },
+          ]}
+          value={newClass}
+          error={openForm.errors.encounterClass}
+          onChange={(event) => setNewClass(event.target.value)}
+        />
+        <Select
+          name="departmentId"
+          label="Department"
+          placeholder="Not set"
+          options={(tenant?.departments ?? []).map((d) => ({ value: d.id, label: d.name }))}
+          value={newDepartment}
+          error={openForm.errors.departmentId}
+          onChange={(event) => setNewDepartment(event.target.value)}
+        />
+        <Field
+          name="chiefComplaint"
+          label="Presenting complaint"
+          placeholder="Chest pain on exertion"
+          hint="Shown on the ward board, so it is deliberately brief and not a clinical narrative."
+          value={newComplaint}
+          error={openForm.errors.chiefComplaint}
+          onChange={(event) => setNewComplaint(event.target.value)}
+        />
+      </FormDialog>
     </>
   );
 }
