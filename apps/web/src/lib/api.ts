@@ -676,3 +676,30 @@ export interface PrescriptionLineInput {
   refillsAuthorised: number;
   substitutionAllowed: boolean;
 }
+
+export interface InventoryLocation {
+  id: string;
+  name: string;
+  code: string;
+  kind: string;
+  allows_controlled: boolean;
+  temperature_controlled: boolean;
+  facility_name: string | null;
+  batches_available: string;
+}
+
+export interface StockAlert {
+  id: string;
+  alert_type: string;
+  severity: string;
+  message: string;
+  status: string;
+  created_at: string;
+  quantity_at_alert: string | null;
+  threshold: string | null;
+  item_name: string;
+  sku: string;
+  reorder_quantity: string | null;
+  location_name: string;
+  preferred_supplier: string | null;
+}
