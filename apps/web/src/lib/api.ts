@@ -633,3 +633,46 @@ export interface EncounterDetail {
     narrative: string | null;
   }>;
 }
+
+export interface FormularyItem {
+  id: string;
+  sku: string;
+  name: string;
+  generic_name: string | null;
+  form: string | null;
+  strength: string | null;
+  route: string | null;
+  base_unit: string;
+  controlled_schedule: string | null;
+  is_high_alert: boolean;
+  is_medication: boolean;
+  requires_prescription: boolean;
+  requires_cold_chain: boolean;
+  sale_price_cents: number | null;
+  quantity_on_hand: string;
+}
+
+export interface SafetyWarning {
+  severity: 'contraindicated' | 'severe' | 'moderate' | 'info';
+  code: string;
+  message: string;
+  blocking: boolean;
+}
+
+export interface PrescriptionLineInput {
+  itemId?: string;
+  medicationName: string;
+  strength?: string;
+  form?: string;
+  route: string;
+  doseQuantity: number;
+  doseUnit: string;
+  frequencyCode: string;
+  frequencyPerDay?: number;
+  durationDays?: number;
+  asNeeded: boolean;
+  instructions: string;
+  quantityPrescribed: number;
+  refillsAuthorised: number;
+  substitutionAllowed: boolean;
+}

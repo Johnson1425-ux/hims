@@ -56,6 +56,20 @@ export async function dispense(req: Request, res: Response, next: NextFunction):
   }
 }
 
+export async function items(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    res.json({
+      data: await service.searchItems(req, {
+        q: typeof req.query.q === 'string' ? req.query.q : undefined,
+        medicationsOnly: req.query.medicationsOnly === 'true',
+        limit: typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined,
+      }),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function locations(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     res.json({ data: await service.listLocations(req) });

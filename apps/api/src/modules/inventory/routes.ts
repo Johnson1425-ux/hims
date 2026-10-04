@@ -39,6 +39,14 @@ inventoryRoutes.post(
 
 inventoryRoutes.get('/locations', requirePermission('inventory:read'), controller.locations);
 
+// Prescribers need the formulary but not the whole inventory module, so this
+// one accepts the prescribing grant as well as inventory:read.
+inventoryRoutes.get(
+  '/items',
+  requirePermission('inventory:read', 'prescription:write'),
+  controller.items,
+);
+
 inventoryRoutes.get('/alerts', requirePermission('inventory:read'), controller.alerts);
 
 inventoryRoutes.patch(

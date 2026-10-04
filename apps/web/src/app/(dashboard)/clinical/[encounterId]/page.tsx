@@ -36,7 +36,8 @@ import { Field, FieldSet, FormDialog, Select, TextArea, useFormErrors } from '@/
 import { useSession } from '@/lib/session';
 import { api, ApiError, type EncounterDetail } from '@/lib/api';
 import { formatAge, formatDate, formatDateTime, formatRelative, humanise, pluralise } from '@/lib/format';
-import { IconStethoscope, IconShield } from '@/components/layout/icons';
+import { IconStethoscope } from '@/components/layout/icons';
+import { PrescribeDialog } from '@/components/clinical/prescribe-dialog';
 
 const STATUS_TONE: Record<EncounterDetail['status'], Tone> = {
   draft: 'warning',
@@ -95,6 +96,7 @@ export default function EncounterPage() {
   const [amending, setAmending] = useState(false);
   const [amendReason, setAmendReason] = useState('');
   const [amendNarrative, setAmendNarrative] = useState('');
+  const [prescribing, setPrescribing] = useState(false);
   const [recordingVitals, setRecordingVitals] = useState(false);
   const [vitals, setVitals] = useState<Record<string, string>>({});
 
@@ -304,6 +306,11 @@ export default function EncounterPage() {
             {can('vitals:write') ? (
               <Button variant="secondary" onClick={() => setRecordingVitals(true)}>
                 Record observations
+              </Button>
+            ) : null}
+            {can('prescription:write') ? (
+              <Button variant="secondary" onClick={() => setPrescribing(true)}>
+                Prescribe
               </Button>
             ) : null}
             {editable ? (
@@ -663,6 +670,16 @@ export default function EncounterPage() {
           onChange={(event) => setVitals((v) => ({ ...v, notes: event.target.value }))}
         />
       </FormDialog>
+
+      <PrescribeDialog
+        open={prescribing}
+        onClose={() => setPrescribing(false)}
+        patient={{ id: encounter.patientId, fullName: encounter.patientName, mrn: encounter.mrn }}
+        encounterId={encounter.id}
+        onPrescribed={(reference) =>
+          setNotice({ tone: 'good', text: `Prescription ${reference} issued and sent to the pharmacy.` })
+        }
+      />
     </>
   );
 }

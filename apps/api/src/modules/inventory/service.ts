@@ -735,6 +735,42 @@ async function resolveAlertsIfRecovered(
  * and refusing at the point of selection is kinder than refusing at the point
  * of dispense.
  */
+/**
+ * The formulary: medications that can be prescribed.
+ *
+ * Prescribing needs this to link a line to a stock item — a prescription line
+ * with no item_id cannot be dispensed, and a pharmacy queue showing work that
+ * cannot be completed is worse than one that is empty. The quantity on hand
+ * comes with it so a prescriber can see, at the point of writing, that the
+ * hospital does not currently stock what they are about to write for.
+ */
+export async function searchItems(
+  req: Request,
+  input: { q?: string; medicationsOnly?: boolean; limit?: number },
+): Promise<Array<Record<string, unknown>>> {
+  return runInTenantReadOnly(req, async ({ db }) => {
+    const { rows } = await db.query<Record<string, unknown>>(
+      `SELECT i.id, i.sku, i.name, i.generic_name, i.form, i.strength, i.route,
+              i.base_unit, i.controlled_schedule, i.is_high_alert, i.is_medication,
+              i.requires_prescription, i.requires_cold_chain, i.sale_price_cents,
+              COALESCE((SELECT sum(b.quantity_on_hand) FROM stock_batches b
+                         WHERE b.item_id = i.id AND b.status = 'available'), 0) AS quantity_on_hand
+         FROM inventory_items i
+        WHERE i.is_active
+          AND ($2::boolean IS NOT TRUE OR i.is_medication)
+          AND ($1::text IS NULL
+               OR i.name ILIKE '%' || $1 || '%'
+               OR i.generic_name ILIKE '%' || $1 || '%'
+               OR i.sku ILIKE '%' || $1 || '%')
+        ORDER BY i.name
+        LIMIT $3`,
+      [input.q ?? null, input.medicationsOnly ?? false, Math.min(input.limit ?? 25, 100)],
+    );
+
+    return rows;
+  });
+}
+
 export async function listLocations(req: Request): Promise<Array<Record<string, unknown>>> {
   return runInTenantReadOnly(req, async ({ db }) => {
     const { rows } = await db.query<Record<string, unknown>>(
