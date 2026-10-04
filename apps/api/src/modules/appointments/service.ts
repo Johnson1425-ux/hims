@@ -44,6 +44,36 @@ export interface FreeSlot {
 }
 
 /**
+ * The bookable appointment types.
+ *
+ * A booking cannot be made without one — the type carries the duration, the
+ * buffer, the notice period and the modality — so a booking screen is unusable
+ * without this list. `patient_bookable` is returned because the portal must
+ * offer only what the hospital has opened to self-booking, and the service
+ * enforces the same rule when the slot search runs.
+ */
+export async function listAppointmentTypes(req: Request): Promise<Array<Record<string, unknown>>> {
+  return runInTenantReadOnly(req, async ({ db }) => {
+    const portalUser = Boolean(req.principal?.patientId);
+
+    const { rows } = await db.query<Record<string, unknown>>(
+      `SELECT at.id, at.code, at.name, at.duration_minutes, at.buffer_after_minutes,
+              at.modality, at.colour, at.base_price_cents, at.min_notice_hours,
+              at.max_advance_days, at.patient_bookable, at.requires_referral,
+              at.department_id, d.name AS department_name
+         FROM appointment_types at
+         LEFT JOIN departments d ON d.id = at.department_id
+        WHERE at.is_active
+          AND ($1::boolean IS NOT TRUE OR at.patient_bookable)
+        ORDER BY d.name NULLS FIRST, at.name`,
+      [portalUser],
+    );
+
+    return rows;
+  });
+}
+
+/**
  * Expand availability rules into bookable slots, minus leave, minus existing
  * bookings, minus anything inside the appointment type's notice period.
  *

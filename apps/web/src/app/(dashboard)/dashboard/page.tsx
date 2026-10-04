@@ -132,14 +132,18 @@ export default function DashboardPage() {
         actions={
           <>
             {can('patient:write') ? (
-              <Button variant="secondary" icon={<IconPlus />} onClick={() => (window.location.href = '/patients?new=1')}>
-                Register patient
-              </Button>
+              <Link href="/patients/new">
+                <Button variant="secondary" icon={<IconPlus />}>
+                  Register patient
+                </Button>
+              </Link>
             ) : null}
             {can('appointment:write') ? (
-              <Button variant="primary" icon={<IconCalendar />} onClick={() => (window.location.href = '/appointments?book=1')}>
-                Book appointment
-              </Button>
+              <Link href="/appointments/new">
+                <Button variant="primary" icon={<IconCalendar />}>
+                  Book appointment
+                </Button>
+              </Link>
             ) : null}
           </>
         }

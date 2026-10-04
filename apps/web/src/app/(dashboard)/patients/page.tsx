@@ -14,6 +14,7 @@
  * details are masked until someone opens the individual record — which is an
  * audited read.
  */
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/layout/shell';
@@ -93,9 +94,11 @@ export default function PatientsPage() {
         subtitle={loading ? 'Loading roster…' : `${total.toLocaleString()} registered`}
         actions={
           can('patient:write') ? (
-            <Button variant="primary" icon={<IconPlus />}>
-              Register patient
-            </Button>
+            <Link href="/patients/new">
+              <Button variant="primary" icon={<IconPlus />}>
+                Register patient
+              </Button>
+            </Link>
           ) : null
         }
       />
@@ -170,9 +173,11 @@ export default function PatientsPage() {
             }
             action={
               can('patient:write') ? (
-                <Button variant="primary" icon={<IconPlus />}>
-                  Register patient
-                </Button>
+                <Link href="/patients/new">
+                  <Button variant="primary" icon={<IconPlus />}>
+                    Register patient
+                  </Button>
+                </Link>
               ) : null
             }
           />

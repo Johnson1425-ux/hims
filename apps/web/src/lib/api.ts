@@ -551,3 +551,20 @@ export interface BreakGlassGrant {
   review_outcome: string | null;
   actions_taken: string;
 }
+
+export interface AppointmentType {
+  id: string;
+  code: string;
+  name: string;
+  duration_minutes: number;
+  buffer_after_minutes: number;
+  modality: string;
+  colour: string;
+  base_price_cents: number;
+  min_notice_hours: number;
+  max_advance_days: number;
+  patient_bookable: boolean;
+  requires_referral: boolean;
+  department_id: string | null;
+  department_name: string | null;
+}

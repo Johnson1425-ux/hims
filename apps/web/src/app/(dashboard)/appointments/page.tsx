@@ -14,6 +14,7 @@
  * an error dialog.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { PageHeader } from '@/components/layout/shell';
 import {
   Alert,
@@ -34,6 +35,7 @@ import { useSession } from '@/lib/session';
 import { api, ApiError, type AppointmentListItem } from '@/lib/api';
 import { formatTime, humanise, pluralise } from '@/lib/format';
 import { IconCalendar, IconChevronRight } from '@/components/layout/icons';
+import { Checkbox, Field, FormDialog, TextArea, useFormErrors } from '@/components/ui/forms';
 
 const STATUS_TONE: Record<string, Tone> = {
   scheduled: 'neutral',
@@ -59,6 +61,12 @@ export default function AppointmentsPage() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ tone: Tone; message: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<AppointmentListItem | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [releaseSlot, setReleaseSlot] = useState(true);
+  const [moving, setMoving] = useState<AppointmentListItem | null>(null);
+  const [newStart, setNewStart] = useState('');
+  const [moveReason, setMoveReason] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,6 +88,56 @@ export default function AppointmentsPage() {
     void load();
   }, [load]);
 
+  /**
+   * Cancelling asks for a reason and defaults to releasing the slot.
+   *
+   * The reason is required by the API, not by politeness: a cancellation rate
+   * is only actionable if you know whether the hospital or the patient
+   * cancelled, and "no reason recorded" is the answer that makes the
+   * utilisation report useless. Releasing to the waitlist is the default
+   * because a freed slot that nobody is offered is a slot wasted twice.
+   */
+  async function cancel(): Promise<void> {
+    if (!cancelling) return;
+
+    cancelForm.reset();
+
+    try {
+      await api.post(`/appointments/${cancelling.id}/cancel`, {
+        reason: cancelReason,
+        releaseToWaitlist: releaseSlot,
+      });
+      setNotice({ tone: 'good', message: `${cancelling.patientName}'s appointment was cancelled.` });
+      setCancelling(null);
+      setCancelReason('');
+      await load();
+    } catch (caught) {
+      cancelForm.capture(caught);
+    }
+  }
+
+  async function reschedule(): Promise<void> {
+    if (!moving || !newStart) return;
+
+    moveForm.reset();
+
+    try {
+      // datetime-local has no zone, so it is read in the browser's zone and
+      // sent as an absolute instant — which is what the column stores.
+      await api.post(`/appointments/${moving.id}/reschedule`, {
+        startsAt: new Date(newStart).toISOString(),
+        reason: moveReason || undefined,
+      });
+      setNotice({ tone: 'good', message: `${moving.patientName}'s appointment was moved.` });
+      setMoving(null);
+      setNewStart('');
+      setMoveReason('');
+      await load();
+    } catch (caught) {
+      moveForm.capture(caught);
+    }
+  }
+
   async function checkIn(appointment: AppointmentListItem) {
     setBusyId(appointment.id);
     setNotice(null);
@@ -94,6 +152,9 @@ export default function AppointmentsPage() {
       setBusyId(null);
     }
   }
+
+  const cancelForm = useFormErrors();
+  const moveForm = useFormErrors();
 
   const counts = useMemo(() => {
     const byStatus = appointments.reduce<Record<string, number>>((acc, appointment) => {
@@ -123,9 +184,11 @@ export default function AppointmentsPage() {
         }
         actions={
           can('appointment:write') ? (
-            <Button variant="primary" icon={<IconCalendar />}>
-              Book appointment
-            </Button>
+            <Link href="/appointments/new">
+              <Button variant="primary" icon={<IconCalendar />}>
+                Book appointment
+              </Button>
+            </Link>
           ) : null
         }
       />
@@ -261,26 +324,59 @@ export default function AppointmentsPage() {
                         </Badge>
                       </Td>
                       <Td align="right">
-                        {can('appointment:checkin') &&
-                        ['scheduled', 'confirmed'].includes(appointment.status) ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            loading={busyId === appointment.id}
-                            onClick={() => void checkIn(appointment)}
-                          >
-                            Check in
-                          </Button>
-                        ) : appointment.status === 'checked_in' ? (
-                          <a
-                            href={`/patients/${appointment.patientId}`}
-                            className="inline-flex items-center gap-1 text-[0.8125rem]"
-                            style={{ color: 'var(--accent)' }}
-                          >
-                            Open chart
-                            <IconChevronRight className="h-3.5 w-3.5" />
-                          </a>
-                        ) : null}
+                        <span className="flex flex-wrap items-center justify-end gap-1.5">
+                          {can('appointment:checkin') &&
+                          ['scheduled', 'confirmed'].includes(appointment.status) ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              loading={busyId === appointment.id}
+                              onClick={() => void checkIn(appointment)}
+                            >
+                              Check in
+                            </Button>
+                          ) : null}
+
+                          {appointment.status === 'checked_in' ? (
+                            <Link
+                              href={`/patients/${appointment.patientId}`}
+                              className="inline-flex items-center gap-1 text-[0.8125rem]"
+                              style={{ color: 'var(--accent)' }}
+                            >
+                              Open chart
+                              <IconChevronRight className="h-3.5 w-3.5" />
+                            </Link>
+                          ) : null}
+
+                          {can('appointment:write') &&
+                          ['scheduled', 'confirmed'].includes(appointment.status) ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setMoving(appointment);
+                                  setNewStart(appointment.startsAt.slice(0, 16));
+                                  moveForm.reset();
+                                }}
+                              >
+                                Move
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setCancelling(appointment);
+                                  setCancelReason('');
+                                  setReleaseSlot(true);
+                                  cancelForm.reset();
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </>
+                          ) : null}
+                        </span>
                       </Td>
                     </Tr>
                   ))}
@@ -290,6 +386,74 @@ export default function AppointmentsPage() {
           )}
         </Card>
       </div>
+
+      <FormDialog
+        open={cancelling !== null}
+        onClose={() => setCancelling(null)}
+        title="Cancel this appointment"
+        description={
+          cancelling
+            ? `${cancelling.patientName} · ${formatTime(cancelling.startsAt)} with ${cancelling.providerName}`
+            : undefined
+        }
+        submitLabel="Cancel the appointment"
+        submitTone="danger"
+        message={cancelForm.message}
+        disabled={cancelReason.trim().length === 0}
+        onSubmit={cancel}
+      >
+        <TextArea
+          name="reason"
+          label="Why is it being cancelled?"
+          required
+          rows={3}
+          hint="Recorded against the appointment. A cancellation rate is only actionable if the reason is known."
+          value={cancelReason}
+          error={cancelForm.errors.reason}
+          onChange={(event) => setCancelReason(event.target.value)}
+        />
+        <Checkbox
+          name="releaseToWaitlist"
+          label="Offer the freed slot to the waitlist"
+          hint="Patients waiting for this clinician are offered it automatically."
+          checked={releaseSlot}
+          onChange={(event) => setReleaseSlot(event.target.checked)}
+        />
+      </FormDialog>
+
+      <FormDialog
+        open={moving !== null}
+        onClose={() => setMoving(null)}
+        title="Move this appointment"
+        description={
+          moving
+            ? `${moving.patientName} · currently ${formatTime(moving.startsAt)} with ${moving.providerName}`
+            : undefined
+        }
+        submitLabel="Move it"
+        message={moveForm.message}
+        disabled={!newStart}
+        onSubmit={reschedule}
+      >
+        <Field
+          name="startsAt"
+          label="New start time"
+          type="datetime-local"
+          required
+          hint="The booking constraint still applies — a time the clinician already has is refused."
+          value={newStart}
+          error={moveForm.errors.startsAt}
+          onChange={(event) => setNewStart(event.target.value)}
+        />
+        <Field
+          name="moveReason"
+          label="Reason"
+          placeholder="Clinic overran"
+          value={moveReason}
+          error={moveForm.errors.reason}
+          onChange={(event) => setMoveReason(event.target.value)}
+        />
+      </FormDialog>
     </>
   );
 }

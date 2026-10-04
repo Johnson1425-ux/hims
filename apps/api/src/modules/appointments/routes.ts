@@ -22,6 +22,8 @@ appointmentRoutes.use(authenticate);
 const canRead = requirePermission('appointment:read', 'portal:self_read');
 const canWrite = requirePermission('appointment:write', 'portal:self_booking');
 
+appointmentRoutes.get('/types', canRead, controller.types);
+
 appointmentRoutes.get(
   '/availability',
   canWrite,
