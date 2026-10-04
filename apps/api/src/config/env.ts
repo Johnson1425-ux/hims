@@ -88,6 +88,9 @@ const schema = z.object({
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
 
+  // Reserved. Nothing connects to Redis today — the reminder worker polls the
+  // outbox table directly — so no Redis has to be running. Kept so the
+  // deployment shape does not change when caching and a real queue arrive.
   REDIS_URL: z.string().default('redis://localhost:6379'),
   REMINDER_SCAN_INTERVAL_SECONDS: z.coerce.number().int().positive().default(60),
   REMINDER_OFFSETS_HOURS: z

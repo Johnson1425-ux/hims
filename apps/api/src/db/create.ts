@@ -138,8 +138,10 @@ function checkPortAgreement(): void {
   for (const name of disagree) {
     log(`    ${name.padEnd(24)} port ${portOf(process.env[name] ?? '') ?? '?'}`);
   }
-  log('\n  All four have to agree. Unless you meant to point them at a different');
-  log('  server, update .env:\n');
+  log('\n  POSTGRES_PORT publishes the bundled container; the URLs say where');
+  log('  clients look, and all four have to agree. If you are using your own');
+  log('  PostgreSQL rather than the container, delete POSTGRES_PORT from .env —');
+  log('  it means nothing then. Otherwise:\n');
   for (const line of urlPortFixes(declared)) log(`  ${line}`);
   log('');
 }

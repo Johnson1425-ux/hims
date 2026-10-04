@@ -72,9 +72,15 @@ export async function getStockStatus(
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const offset = (input.page - 1) * input.pageSize;
 
-    const [{ rows }, { rows: countRows }, { rows: summaryRows }] = await Promise.all([
+    // count(*) OVER () is evaluated before LIMIT, so the page and its total
+    // come back from ONE scan of the view. A separate `SELECT count(*)` with
+    // the same WHERE clause scanned it a second time for a number the first
+    // query already had in hand — and this view aggregates batches, so a scan
+    // is not cheap.
+    const [{ rows }, { rows: summaryRows }] = await Promise.all([
       db.query<Record<string, unknown>>(
-        `SELECT * FROM v_stock_status ${whereClause}
+        `SELECT *, count(*) OVER () AS total_count
+           FROM v_stock_status ${whereClause}
           ORDER BY CASE stock_state
                      WHEN 'out_of_stock' THEN 0 WHEN 'critical' THEN 1
                      WHEN 'low' THEN 2 WHEN 'overstocked' THEN 3 ELSE 4 END,
@@ -82,7 +88,6 @@ export async function getStockStatus(
           LIMIT ${input.pageSize} OFFSET ${offset}`,
         params,
       ),
-      db.query<{ count: string }>(`SELECT count(*) FROM v_stock_status ${whereClause}`, params),
       // Headline counts for the dashboard tiles, unaffected by paging.
       db.query<{ stock_state: string; count: string }>(
         'SELECT stock_state, count(*) FROM v_stock_status GROUP BY stock_state',
@@ -110,7 +115,9 @@ export async function getStockStatus(
           ? (row.earliest_expiry as Date).toISOString().slice(0, 10)
           : null,
       })),
-      total: Number(countRows[0]?.count ?? 0),
+      // No rows means nothing matched, so the window function produced no
+      // value to read — which is the same as a total of zero.
+      total: Number(rows[0]?.total_count ?? 0),
       summary: Object.fromEntries(summaryRows.map((r) => [r.stock_state, Number(r.count)])),
     };
   });

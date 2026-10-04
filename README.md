@@ -29,11 +29,20 @@ The brief left these open; the choices and their reasons:
 ## Quick start
 
 ```bash
-# 1. PostgreSQL (and Redis). Optional services sit behind a profile, so a
-#    registry hiccup in one of them can never stop the database coming up.
-#    This gives you a bare server with the stock `postgres` superuser —
-#    the application's roles and database come from step 3.
+# 1. A PostgreSQL 15+ server. Two options:
+#
+#    (a) You already have one installed — use it. Nothing to start, nothing
+#        in Docker. Point DATABASE_ADMIN_URL at it in step 2 and skip to 3.
+#
+#    (b) Use the bundled one. It gives you a bare server with the stock
+#        `postgres` superuser; the application's roles and database come
+#        from step 3. Optional services sit behind a profile, so a registry
+#        hiccup in one of them can never stop the database coming up.
 docker compose -f infra/docker-compose.yml up -d
+
+#    Nothing else has to be running. The API has no Redis client yet, so the
+#    redis container is optional, and object storage and the mail catcher are
+#    behind the `extras` profile.
 
 # 2. Configuration
 cp .env.example .env
@@ -56,11 +65,12 @@ pnpm dev          # API on :4000, web on :3000
 ### What has to be set before each step
 
 Short version: **`db:create` needs nothing** if you are using the bundled
-Docker PostgreSQL. The keys matter from `db:migrate` onwards.
+Docker PostgreSQL, or just `DATABASE_ADMIN_URL` if you are using your own. The
+keys matter from `db:migrate` onwards.
 
 | Step | Needs | Why |
 |---|---|---|
-| `pnpm db:create` | nothing (defaults match the compose file) | Only connects as the bootstrap superuser to create roles and the database |
+| `pnpm db:create` | nothing with the container; `DATABASE_ADMIN_URL` with your own server | Only connects as the bootstrap superuser to create roles and the database |
 | `pnpm db:migrate` | `DATABASE_MIGRATION_URL` | Defaults are correct if you did not change `DATABASE_DEV_PASSWORD` |
 | `pnpm db:seed` | the four keys below | It encrypts PHI, so it cannot run without them |
 | `pnpm dev` | the four keys below | The API validates configuration and **exits** rather than running unsafely |
@@ -104,18 +114,47 @@ PostgreSQL 16 — creating local database
 An `apps/api/.env` is also read if present and takes precedence, and real
 environment variables beat both — so CI and container secrets always win.
 
-### Already have PostgreSQL installed?
+### Already have PostgreSQL installed? Use it
 
-Skip step 1 entirely. `pnpm db:create` works against any PostgreSQL 15+ —
-point it at yours and it creates the database and roles for you:
+Skip step 1 entirely — no container, and nothing in Docker holding RAM.
+`pnpm db:create` works against any PostgreSQL 15+: it creates the `hims`
+database and its four roles inside your server and touches nothing else in it.
+
+Four lines in `.env`, all agreeing on the port — delete `POSTGRES_PORT`, which
+only publishes the container and means nothing here:
 
 ```bash
-# .env
-DATABASE_ADMIN_URL=postgresql://postgres:yourpassword@localhost:5432/postgres
+# .env  — your own server, on the conventional 5432
+DATABASE_ADMIN_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/postgres
+DATABASE_URL=postgresql://hims_app:dev-only-password@localhost:5432/hims
+DATABASE_MIGRATION_URL=postgresql://hims_owner:dev-only-password@localhost:5432/hims
 ```
 
-It is idempotent, so it is safe to re-run; `pnpm db:create -- --drop` recreates
-from scratch (and refuses to run against anything that is not localhost).
+Then:
+
+```bash
+pnpm db:create    # creates hims_owner, hims_app, hims_platform, hims_analytics
+pnpm db:migrate
+pnpm db:seed
+```
+
+`db:create` prints which `.env` files it read, checks the server is 15 or
+later, and finishes by connecting as each configured URL so a wrong password
+is caught there rather than by `db:migrate`. It is idempotent, so it is safe to
+re-run; `pnpm db:create -- --drop` recreates from scratch (and refuses to run
+against anything that is not localhost).
+
+The four extensions the schema needs — `pgcrypto`, `citext`, `btree_gist`,
+`pg_trgm` — are all *trusted*, so `hims_owner` can create them as the owner of
+its own database without being a superuser. They ship with the standard
+Windows and macOS installers.
+
+To stop the containers and reclaim the memory:
+
+```bash
+docker compose -f infra/docker-compose.yml down     # keeps the volume
+docker compose -f infra/docker-compose.yml down -v  # and discards its data
+```
 
 ### Why four database roles
 
