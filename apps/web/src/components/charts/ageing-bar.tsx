@@ -43,9 +43,10 @@ const RAMP = ['var(--ramp-1)', 'var(--ramp-2)', 'var(--ramp-3)', 'var(--ramp-4)'
 
 export function AgeingBar({
   buckets,
-  currency = 'USD',
+  currency,
 }: {
   buckets: Record<string, { totalCents: number; count: number }>;
+  /** Omitted means the tenant's own currency, which formatMoney already holds. */
   currency?: string;
 }): ReactNode {
   const data: AgeingDatum[] = BUCKET_ORDER.map((bucket) => ({
@@ -84,7 +85,7 @@ export function AgeingBar({
               <div
                 className="relative h-5 overflow-hidden rounded-[var(--radius-xs)]"
                 style={{ background: 'var(--surface-sunken)' }}
-                title={`${datum.label}: ${formatMoney(datum.totalCents, currency)} across ${datum.count} invoice(s)`}
+                title={`${datum.label}: ${formatMoney(datum.totalCents, currency ?? undefined)} across ${datum.count} invoice(s)`}
               >
                 <div
                   className="absolute inset-y-0 left-0 transition-[width] duration-500"
@@ -101,7 +102,7 @@ export function AgeingBar({
                 className="tabular text-right text-[0.8125rem] font-medium whitespace-nowrap"
                 style={{ color: isAged ? 'var(--critical-ink)' : 'var(--ink)' }}
               >
-                {formatMoney(datum.totalCents, currency)}
+                {formatMoney(datum.totalCents, currency ?? undefined)}
                 <span className="ml-1.5 font-normal" style={{ color: 'var(--ink-muted)' }}>
                   ({datum.count})
                 </span>
@@ -119,7 +120,7 @@ export function AgeingBar({
           Total outstanding
         </span>
         <span className="tabular text-[0.9375rem] font-semibold" style={{ color: 'var(--ink)' }}>
-          {formatMoney(total, currency)}
+          {formatMoney(total, currency ?? undefined)}
         </span>
       </div>
     </div>

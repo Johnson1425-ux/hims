@@ -33,14 +33,14 @@ const TENANTS: SeedTenant[] = [
     legalName: 'Mercy Health Group',
     displayName: 'Mercy General Hospital',
     facilityCode: 'MGH',
-    timezone: 'America/New_York',
+    timezone: 'Africa/Dar_es_Salaam',
   },
   {
     slug: 'stjude',
     legalName: 'St Jude Community Clinics',
     displayName: "St Jude's Clinic",
     facilityCode: 'SJC',
-    timezone: 'Europe/London',
+    timezone: 'Africa/Dar_es_Salaam',
   },
 ];
 
@@ -63,25 +63,30 @@ const PATIENTS = [
 ];
 
 const MEDICATIONS = [
-  { sku: 'MED-AMOX500', name: 'Amoxicillin 500mg Capsule', generic: 'Amoxicillin', form: 'capsule', strength: '500 mg', route: 'oral', unit: 'capsule', reorder: 200, critical: 50, reorderQty: 1000, cost: 12, sale: 45, controlled: null, highAlert: false },
-  { sku: 'MED-PARA500', name: 'Paracetamol 500mg Tablet', generic: 'Paracetamol', form: 'tablet', strength: '500 mg', route: 'oral', unit: 'tablet', reorder: 500, critical: 100, reorderQty: 2000, cost: 3, sale: 12, controlled: null, highAlert: false },
-  { sku: 'MED-METF850', name: 'Metformin 850mg Tablet', generic: 'Metformin', form: 'tablet', strength: '850 mg', route: 'oral', unit: 'tablet', reorder: 300, critical: 80, reorderQty: 1200, cost: 8, sale: 30, controlled: null, highAlert: false },
-  { sku: 'MED-INSGLA', name: 'Insulin Glargine 100IU/mL', generic: 'Insulin glargine', form: 'injection', strength: '100 IU/mL', route: 'subcutaneous', unit: 'vial', reorder: 20, critical: 6, reorderQty: 60, cost: 2400, sale: 4200, controlled: null, highAlert: true },
-  { sku: 'MED-MORPH10', name: 'Morphine Sulfate 10mg/mL', generic: 'Morphine', form: 'injection', strength: '10 mg/mL', route: 'intravenous', unit: 'ampoule', reorder: 30, critical: 10, reorderQty: 100, cost: 180, sale: 350, controlled: 'II', highAlert: true },
-  { sku: 'MED-AMLO5', name: 'Amlodipine 5mg Tablet', generic: 'Amlodipine', form: 'tablet', strength: '5 mg', route: 'oral', unit: 'tablet', reorder: 250, critical: 60, reorderQty: 1000, cost: 5, sale: 20, controlled: null, highAlert: false },
-  { sku: 'CON-GLOVEM', name: 'Nitrile Examination Gloves (M)', generic: null, form: null, strength: null, route: null, unit: 'box', reorder: 40, critical: 10, reorderQty: 200, cost: 650, sale: 0, controlled: null, highAlert: false },
-  { sku: 'CON-SYR5ML', name: 'Disposable Syringe 5mL', generic: null, form: null, strength: null, route: null, unit: 'each', reorder: 500, critical: 150, reorderQty: 2000, cost: 15, sale: 25, controlled: null, highAlert: false },
+  { sku: 'MED-AMOX500', name: 'Amoxicillin 500mg Capsule', generic: 'Amoxicillin', form: 'capsule', strength: '500 mg', route: 'oral', unit: 'capsule', reorder: 200, critical: 50, reorderQty: 1000, cost: 150, sale: 400, controlled: null, highAlert: false },
+  { sku: 'MED-PARA500', name: 'Paracetamol 500mg Tablet', generic: 'Paracetamol', form: 'tablet', strength: '500 mg', route: 'oral', unit: 'tablet', reorder: 500, critical: 100, reorderQty: 2000, cost: 30, sale: 100, controlled: null, highAlert: false },
+  { sku: 'MED-METF850', name: 'Metformin 850mg Tablet', generic: 'Metformin', form: 'tablet', strength: '850 mg', route: 'oral', unit: 'tablet', reorder: 300, critical: 80, reorderQty: 1200, cost: 80, sale: 250, controlled: null, highAlert: false },
+  { sku: 'MED-INSGLA', name: 'Insulin Glargine 100IU/mL', generic: 'Insulin glargine', form: 'injection', strength: '100 IU/mL', route: 'subcutaneous', unit: 'vial', reorder: 20, critical: 6, reorderQty: 60, cost: 32_000, sale: 48_000, controlled: null, highAlert: true },
+  { sku: 'MED-MORPH10', name: 'Morphine Sulfate 10mg/mL', generic: 'Morphine', form: 'injection', strength: '10 mg/mL', route: 'intravenous', unit: 'ampoule', reorder: 30, critical: 10, reorderQty: 100, cost: 2_500, sale: 4_500, controlled: 'II', highAlert: true },
+  { sku: 'MED-AMLO5', name: 'Amlodipine 5mg Tablet', generic: 'Amlodipine', form: 'tablet', strength: '5 mg', route: 'oral', unit: 'tablet', reorder: 250, critical: 60, reorderQty: 1000, cost: 60, sale: 200, controlled: null, highAlert: false },
+  { sku: 'CON-GLOVEM', name: 'Nitrile Examination Gloves (M)', generic: null, form: null, strength: null, route: null, unit: 'box', reorder: 40, critical: 10, reorderQty: 200, cost: 9_000, sale: 0, controlled: null, highAlert: false },
+  { sku: 'CON-SYR5ML', name: 'Disposable Syringe 5mL', generic: null, form: null, strength: null, route: null, unit: 'each', reorder: 500, critical: 150, reorderQty: 2000, cost: 200, sale: 400, controlled: null, highAlert: false },
 ];
 
+// Prices are whole Tanzanian shillings — see migration 0014 on why there is
+// nothing to divide — at the sort of rates a private clinic in Dar es Salaam
+// posts on the wall. The figures matter beyond cosmetics: they are what the
+// ageing buckets, collection rates and payer mix on the billing screens are
+// computed from, and implausible ones make a demo impossible to reason about.
 const SERVICES = [
-  { code: 'CONS-GP', name: 'General Consultation', category: 'consultation', cpt: '99213', price: 7500 },
-  { code: 'CONS-SPEC', name: 'Specialist Consultation', category: 'consultation', cpt: '99244', price: 18000 },
-  { code: 'CONS-FOLLOW', name: 'Follow-up Review', category: 'consultation', cpt: '99212', price: 4500 },
-  { code: 'LAB-FBC', name: 'Full Blood Count', category: 'diagnostic', cpt: '85025', price: 3200 },
-  { code: 'LAB-HBA1C', name: 'HbA1c', category: 'diagnostic', cpt: '83036', price: 4800 },
-  { code: 'IMG-CXR', name: 'Chest X-Ray', category: 'diagnostic', cpt: '71046', price: 9500 },
-  { code: 'PROC-ECG', name: 'Electrocardiogram', category: 'procedure', cpt: '93000', price: 6000 },
-  { code: 'PROC-SUTURE', name: 'Wound Suturing', category: 'procedure', cpt: '12002', price: 14000 },
+  { code: 'CONS-GP', name: 'General Consultation', category: 'consultation', cpt: '99213', price: 20_000 },
+  { code: 'CONS-SPEC', name: 'Specialist Consultation', category: 'consultation', cpt: '99244', price: 50_000 },
+  { code: 'CONS-FOLLOW', name: 'Follow-up Review', category: 'consultation', cpt: '99212', price: 10_000 },
+  { code: 'LAB-FBC', name: 'Full Blood Count', category: 'diagnostic', cpt: '85025', price: 15_000 },
+  { code: 'LAB-HBA1C', name: 'HbA1c', category: 'diagnostic', cpt: '83036', price: 35_000 },
+  { code: 'IMG-CXR', name: 'Chest X-Ray', category: 'diagnostic', cpt: '71046', price: 25_000 },
+  { code: 'PROC-ECG', name: 'Electrocardiogram', category: 'procedure', cpt: '93000', price: 30_000 },
+  { code: 'PROC-SUTURE', name: 'Wound Suturing', category: 'procedure', cpt: '12002', price: 45_000 },
 ];
 
 async function main(): Promise<void> {
@@ -120,9 +125,12 @@ async function main(): Promise<void> {
       await client.query('SELECT hims_util.set_request_context($1, NULL, false)', [tenantId]);
 
       await client.query(
+        // currency and locale are stated rather than left to the column
+        // default, so re-seeding an older database does not inherit the USD
+        // defaults that migration 0014 replaced.
         `INSERT INTO tenants (id, slug, legal_name, display_name, facility_code, timezone,
-                              dek_wrapped, dek_key_version, status, branding)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)`,
+                              currency, locale, dek_wrapped, dek_key_version, status, branding)
+         VALUES ($1,$2,$3,$4,$5,$6,'TZS','en-TZ',$7,$8,'active',$9)`,
         [
           tenantId,
           tenant.slug,
@@ -247,7 +255,7 @@ async function main(): Promise<void> {
             minutes,
             code === 'TELE20' ? 'telehealth' : 'in_person',
             colour,
-            minutes >= 45 ? 18000 : 7500,
+            minutes >= 45 ? 50_000 : 20_000,
           ],
         );
         apptTypes[code] = rows[0]!.id;
@@ -279,8 +287,8 @@ async function main(): Promise<void> {
 
       const { rows: payerRows } = await client.query<{ id: string }>(
         `INSERT INTO insurance_payers (tenant_id, name, code, payer_type, typical_settlement_days)
-         VALUES ($1, 'Statewide Health Mutual', 'SHM', 'commercial', 28),
-                ($1, 'National Care Plan', 'NCP', 'government', 45),
+         VALUES ($1, 'Jubilee Health Insurance', 'JHI', 'commercial', 28),
+                ($1, 'National Health Insurance Fund', 'NHIF', 'government', 45),
                 ($1, 'Self Pay', 'SELF', 'self_pay', 0)
          RETURNING id`,
         [tenantId],
@@ -305,6 +313,12 @@ async function main(): Promise<void> {
       );
 
       // ---- Stock, with a deliberate mix of healthy and low levels ------------
+      // Keyed by SKU so the prescriptions seeded further down can point at a
+      // real stock item: a prescription line with no item_id cannot be
+      // dispensed, which would leave the dispensing queue showing work that
+      // does not work.
+      const itemIdsBySku: Record<string, string> = {};
+
       for (const [index, med] of MEDICATIONS.entries()) {
         const { rows: itemRows } = await client.query<{ id: string }>(
           `INSERT INTO inventory_items (tenant_id, sku, name, is_medication, category, generic_name,
@@ -340,6 +354,7 @@ async function main(): Promise<void> {
         );
 
         const itemId = itemRows[0]!.id;
+        itemIdsBySku[med.sku] = itemId;
         const location = med.controlled ? controlledCabinet! : mainPharmacy!;
 
         // Vary the quantities so the stock board shows ok / low / critical and
@@ -377,6 +392,10 @@ async function main(): Promise<void> {
 
       // ---- Patients ----------------------------------------------------------
       const patientIds: string[] = [];
+      // Kept so the invoices below can name a policy. Without it every invoice
+      // is self-pay, and the revenue report's payer mix — the thing it exists
+      // to show — has exactly one row in it.
+      const policyByPatient: Record<string, { policyId: string; payerId: string }> = {};
 
       for (const [index, patient] of PATIENTS.entries()) {
         const { rows: idRows } = await client.query<{ id: string }>('SELECT gen_random_uuid() AS id');
@@ -483,21 +502,24 @@ async function main(): Promise<void> {
              (id, tenant_id, patient_id, payer_id, precedence, plan_name, member_number_encrypted,
               member_number_blind_index, member_number_last4, effective_on, copay_cents,
               coinsurance_rate, verification_status, verified_at)
-           VALUES ($1,$2,$3,$4,1,'Standard PPO',$5,$6,$7, CURRENT_DATE - 200, 2500, 0.2, 'active', now())`,
+           VALUES ($1,$2,$3,$4,1,$8,$5,$6,$7, CURRENT_DATE - 200, 5000, 0.2, 'active', now())`,
           [
             policyId,
             tenantId,
             patientId,
             payerRows[index % 2]!.id,
-            cipher.encrypt(`SHM${900000 + index}`, {
+            cipher.encrypt(`MBR${900000 + index}`, {
               table: 'patient_insurance_policies',
               column: 'member_number_encrypted',
               recordId: policyId,
             }),
-            blindIndex(tenantId, 'policy.member_number', `SHM${900000 + index}`),
+            blindIndex(tenantId, 'policy.member_number', `MBR${900000 + index}`),
             String(900000 + index).slice(-4),
+            index % 2 === 0 ? 'Jubilee Corporate' : 'NHIF Scheme B',
           ],
         );
+
+        policyByPatient[patientId] = { policyId, payerId: payerRows[index % 2]!.id };
       }
 
       // ---- Appointments across the coming fortnight -------------------------
@@ -608,35 +630,460 @@ async function main(): Promise<void> {
         [tenantId, patientIds[0]!, encounterId, staffIds.nurse!.profileId],
       );
 
-      // ---- One invoice, part paid ------------------------------------------
-      const { rows: invoiceRows } = await client.query<{ id: string }>(
-        `INSERT INTO invoices (tenant_id, invoice_number, patient_id, encounter_id, facility_id,
-                               issued_on, due_on, status, billing_stage, created_by)
-         VALUES ($1, hims_util.allocate_reference($1,'invoice','INV'), $2,$3,$4,
-                 CURRENT_DATE - 7, CURRENT_DATE + 23, 'issued', 'patient_responsibility', $5)
-         RETURNING id`,
-        [tenantId, patientIds[0]!, encounterId, facilityId, staffIds.billing!.userId],
-      );
+      // ---- A live clinical worklist -----------------------------------------
+      // The encounter above is signed and a week old, which leaves the
+      // worklist and the dashboard's "unsigned notes" tile empty — so the two
+      // screens that exist to surface documentation debt have nothing to show
+      // and cannot be judged. These are the states a ward actually holds at
+      // any moment: one being written now, one left unsigned overnight, and
+      // one deteriorating patient whose NEWS2 should put them at the top.
+      const WORKLIST: Array<{
+        patient: number;
+        complaint: string;
+        encounterClass: string;
+        status: string;
+        startedHoursAgo: number;
+        endedHoursAgo: number | null;
+        news2: number | null;
+        observations: string;
+      }> = [
+        {
+          patient: 1,
+          complaint: 'Chest pain on exertion',
+          encounterClass: 'ambulatory',
+          status: 'in_progress',
+          startedHoursAgo: 1,
+          endedHoursAgo: null,
+          news2: 2,
+          observations: 'Alert, chest clear, pain reproducible on palpation.',
+        },
+        {
+          patient: 2,
+          complaint: 'Shortness of breath, 3 days',
+          encounterClass: 'emergency',
+          status: 'pending_signature',
+          startedHoursAgo: 19,
+          endedHoursAgo: 18,
+          news2: 6,
+          observations: 'Tachypnoeic, saturations 91% on air, started on oxygen.',
+        },
+        {
+          patient: 3,
+          complaint: 'Medication review',
+          encounterClass: 'ambulatory',
+          status: 'draft',
+          startedHoursAgo: 30,
+          endedHoursAgo: 30,
+          news2: 1,
+          observations: 'Stable. Adherence good, no adverse effects reported.',
+        },
+      ];
 
+      for (const entry of WORKLIST) {
+        const patientId = patientIds[entry.patient % patientIds.length]!;
+
+        const { rows: idRows } = await client.query<{ id: string }>(
+          'SELECT gen_random_uuid() AS id',
+        );
+        const id = idRows[0]!.id;
+
+        await client.query(
+          `INSERT INTO encounters (id, tenant_id, reference, patient_id, provider_id, facility_id,
+                                   department_id, encounter_class, started_at, ended_at,
+                                   chief_complaint, objective_encrypted, status, created_by)
+           VALUES ($1, $2, hims_util.allocate_reference($2,'encounter','ENC'), $3,$4,$5,$6,$7,
+                   now() - make_interval(hours => $8),
+                   CASE WHEN $9::int IS NULL THEN NULL ELSE now() - make_interval(hours => $9::int) END,
+                   $10, $11, $12, $13)`,
+          [
+            id,
+            tenantId,
+            patientId,
+            staffIds.doctor!.profileId,
+            facilityId,
+            departments.GEN,
+            entry.encounterClass,
+            entry.startedHoursAgo,
+            entry.endedHoursAgo,
+            entry.complaint,
+            cipher.encrypt(entry.observations, {
+              table: 'encounters',
+              column: 'objective_encrypted',
+              recordId: id,
+            }),
+            entry.status,
+            staffIds.doctor!.userId,
+          ],
+        );
+
+        if (entry.news2 !== null) {
+          await client.query(
+            `INSERT INTO vital_signs (tenant_id, patient_id, encounter_id, recorded_by,
+                                      temperature_c, heart_rate_bpm, respiratory_rate,
+                                      systolic_mmhg, diastolic_mmhg, oxygen_saturation,
+                                      news2_score, recorded_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now() - make_interval(hours => $12))`,
+            [
+              tenantId,
+              patientId,
+              id,
+              staffIds.nurse!.profileId,
+              entry.news2 >= 5 ? 38.4 : 36.9,
+              entry.news2 >= 5 ? 112 : 76,
+              entry.news2 >= 5 ? 26 : 16,
+              entry.news2 >= 5 ? 104 : 126,
+              entry.news2 >= 5 ? 64 : 80,
+              entry.news2 >= 5 ? 91 : 98,
+              entry.news2,
+              entry.startedHoursAgo,
+            ],
+          );
+        }
+      }
+
+      // ---- A dispensing queue ----------------------------------------------
+      // Three prescriptions, chosen so the pharmacy screen shows the three
+      // cases that behave differently rather than three of the same: a routine
+      // oral course, a controlled drug that has to come from the locked
+      // cabinet and sorts above everything else, and a cold-chain item that
+      // must not be left on the counter. Each line points at real stock, so
+      // the dispense actually completes and the ledger actually moves.
+      const PRESCRIPTIONS: Array<{
+        patient: number;
+        prescribedHoursAgo: number;
+        lines: Array<{
+          sku: string;
+          name: string;
+          strength: string;
+          route: string;
+          dose: number;
+          unit: string;
+          frequency: string;
+          perDay: number;
+          days: number;
+          quantity: number;
+          instructions: string;
+        }>;
+      }> = [
+        {
+          patient: 0,
+          prescribedHoursAgo: 2,
+          lines: [
+            {
+              sku: 'MED-AMOX500',
+              name: 'Amoxicillin 500mg Capsule',
+              strength: '500 mg',
+              route: 'oral',
+              dose: 1,
+              unit: 'capsule',
+              frequency: 'TDS',
+              perDay: 3,
+              days: 7,
+              quantity: 21,
+              instructions: 'Take ONE capsule three times a day for seven days. Finish the course.',
+            },
+            {
+              sku: 'MED-PARA500',
+              name: 'Paracetamol 500mg Tablet',
+              strength: '500 mg',
+              route: 'oral',
+              dose: 2,
+              unit: 'tablet',
+              frequency: 'QDS',
+              perDay: 4,
+              days: 5,
+              quantity: 40,
+              instructions: 'Take TWO tablets up to four times a day when needed for pain.',
+            },
+          ],
+        },
+        {
+          patient: 1,
+          prescribedHoursAgo: 1,
+          lines: [
+            {
+              sku: 'MED-MORPH10',
+              name: 'Morphine Sulfate 10mg/mL',
+              strength: '10 mg/mL',
+              route: 'intravenous',
+              dose: 5,
+              unit: 'mg',
+              frequency: 'Q4H',
+              perDay: 6,
+              days: 2,
+              quantity: 6,
+              instructions: 'Five milligrams intravenously every four hours as required for severe pain.',
+            },
+          ],
+        },
+        {
+          patient: 2,
+          prescribedHoursAgo: 5,
+          lines: [
+            {
+              sku: 'MED-INSGLA',
+              name: 'Insulin Glargine 100IU/mL',
+              strength: '100 IU/mL',
+              route: 'subcutaneous',
+              dose: 18,
+              unit: 'IU',
+              frequency: 'OD',
+              perDay: 1,
+              days: 28,
+              quantity: 2,
+              instructions: 'Eighteen units subcutaneously at bedtime. Keep refrigerated.',
+            },
+          ],
+        },
+      ];
+
+      for (const script of PRESCRIPTIONS) {
+        const patientId = patientIds[script.patient % patientIds.length]!;
+
+        const { rows: rxRows } = await client.query<{ id: string }>(
+          `INSERT INTO prescriptions (tenant_id, reference, patient_id, prescriber_id, status,
+                                      prescribed_at, valid_until, signed_at, fulfilment)
+           VALUES ($1, hims_util.allocate_reference($1,'prescription','RX'), $2, $3, 'active',
+                   now() - make_interval(hours => $4),
+                   CURRENT_DATE + 90,
+                   now() - make_interval(hours => $4),
+                   'in_house')
+           RETURNING id`,
+          [tenantId, patientId, staffIds.doctor!.profileId, script.prescribedHoursAgo],
+        );
+        const prescriptionId = rxRows[0]!.id;
+
+        for (const [lineNo, line] of script.lines.entries()) {
+          await client.query(
+            `INSERT INTO prescription_items (tenant_id, prescription_id, line_no, item_id,
+                                             medication_name, strength, route, dose_quantity,
+                                             dose_unit, frequency_code, frequency_per_day,
+                                             duration_days, instructions, quantity_prescribed,
+                                             refills_authorised, status)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending')`,
+            [
+              tenantId,
+              prescriptionId,
+              lineNo + 1,
+              itemIdsBySku[line.sku] ?? null,
+              line.name,
+              line.strength,
+              line.route,
+              line.dose,
+              line.unit,
+              line.frequency,
+              line.perDay,
+              line.days,
+              line.instructions,
+              line.quantity,
+              line.sku === 'MED-MORPH10' ? 0 : 1,
+            ],
+          );
+        }
+      }
+
+      // ---- Receivables, aged on purpose -------------------------------------
+      // One invoice tells you nothing. The receivables ageing chart, the payer
+      // mix and the collection rate are all comparisons, and a single
+      // not-yet-due invoice makes every one of them a single bar. These four
+      // are spread across the ageing buckets and across payers, with prices
+      // taken from the catalogue rather than repeated here — a seed that
+      // restates a price is a seed that contradicts it after the first edit.
+      const priceOf = (code: string): number =>
+        SERVICES.find((service) => service.code === code)?.price ?? 0;
+
+      const INVOICES: Array<{
+        patient: number;
+        issuedDaysAgo: number;
+        dueDaysAgo: number;
+        insured: boolean;
+        lines: Array<{ code: string; description: string; cpt: string; quantity: number }>;
+        /** Fraction of the total already received. */
+        settled: number;
+        method: string;
+      }> = [
+        {
+          patient: 0,
+          issuedDaysAgo: 3,
+          dueDaysAgo: -25,
+          insured: false,
+          settled: 0.3,
+          method: 'mobile_money',
+          lines: [
+            { code: 'CONS-GP', description: 'General Consultation', cpt: '99213', quantity: 1 },
+            { code: 'IMG-CXR', description: 'Chest X-Ray', cpt: '71046', quantity: 1 },
+          ],
+        },
+        {
+          patient: 1,
+          issuedDaysAgo: 22,
+          dueDaysAgo: 0,
+          insured: true,
+          settled: 1,
+          method: 'insurance_remittance',
+          lines: [
+            { code: 'CONS-SPEC', description: 'Specialist Consultation', cpt: '99244', quantity: 1 },
+            { code: 'LAB-HBA1C', description: 'HbA1c', cpt: '83036', quantity: 1 },
+          ],
+        },
+        {
+          patient: 2,
+          issuedDaysAgo: 51,
+          dueDaysAgo: 21,
+          insured: true,
+          settled: 0,
+          method: 'cash',
+          lines: [
+            { code: 'PROC-ECG', description: 'Electrocardiogram', cpt: '93000', quantity: 1 },
+            { code: 'CONS-FOLLOW', description: 'Follow-up Review', cpt: '99212', quantity: 2 },
+          ],
+        },
+        {
+          patient: 3,
+          issuedDaysAgo: 96,
+          dueDaysAgo: 66,
+          insured: false,
+          settled: 0,
+          method: 'cash',
+          lines: [
+            { code: 'PROC-SUTURE', description: 'Wound Suturing', cpt: '12002', quantity: 1 },
+            { code: 'LAB-FBC', description: 'Full Blood Count', cpt: '85025', quantity: 1 },
+          ],
+        },
+      ];
+
+      for (const [invoiceIndex, spec] of INVOICES.entries()) {
+        const patientId = patientIds[spec.patient % patientIds.length]!;
+        const policy = spec.insured ? policyByPatient[patientId] : undefined;
+        const total = spec.lines.reduce(
+          (sum, line) => sum + priceOf(line.code) * line.quantity,
+          0,
+        );
+
+        const { rows: invoiceRows } = await client.query<{ id: string }>(
+          `INSERT INTO invoices (tenant_id, invoice_number, patient_id, encounter_id, facility_id,
+                                 primary_policy_id, issued_on, due_on, status, billing_stage,
+                                 created_by)
+           VALUES ($1, hims_util.allocate_reference($1,'invoice','INV'), $2, $3, $4, $5,
+                   -- The casts are required: Postgres cannot resolve a
+                   -- date minus an untyped parameter.
+                   CURRENT_DATE - $6::int, CURRENT_DATE - $7::int, 'issued', $8, $9)
+           RETURNING id`,
+          [
+            tenantId,
+            patientId,
+            invoiceIndex === 0 ? encounterId : null,
+            facilityId,
+            policy?.policyId ?? null,
+            spec.issuedDaysAgo,
+            spec.dueDaysAgo,
+            policy ? 'with_insurer' : 'patient_responsibility',
+            staffIds.billing!.userId,
+          ],
+        );
+        const invoiceId = invoiceRows[0]!.id;
+
+        for (const [lineIndex, line] of spec.lines.entries()) {
+          await client.query(
+            `INSERT INTO invoice_lines (tenant_id, invoice_id, line_no, service_item_id,
+                                        description, cpt_code, quantity, unit_price_cents,
+                                        tax_rate, diagnosis_codes)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,ARRAY['R05.3'])`,
+            [
+              tenantId,
+              invoiceId,
+              lineIndex + 1,
+              serviceIds[line.code],
+              line.description,
+              line.cpt,
+              line.quantity,
+              priceOf(line.code),
+            ],
+          );
+        }
+
+        // Payments are allocated, never just recorded: a payment with no
+        // allocation leaves the invoice looking unpaid, which is the shape of
+        // bug that gets found by a patient being chased twice.
+        const received = Math.round(total * spec.settled);
+
+        if (received > 0) {
+          const { rows: paymentRows } = await client.query<{ id: string }>(
+            `INSERT INTO payments (tenant_id, receipt_number, patient_id, payer_kind, amount_cents,
+                                   method, received_at, received_by)
+             VALUES ($1, hims_util.allocate_reference($1,'receipt','RCP'), $2, $3, $4, $5,
+                     now() - make_interval(days => $6), $7)
+             RETURNING id`,
+            [
+              tenantId,
+              patientId,
+              policy ? 'insurance' : 'patient',
+              received,
+              spec.method,
+              Math.max(0, spec.issuedDaysAgo - 2),
+              staffIds.billing!.userId,
+            ],
+          );
+
+          await client.query(
+            `INSERT INTO payment_allocations (tenant_id, payment_id, invoice_id, amount_cents)
+             VALUES ($1,$2,$3,$4)`,
+            [tenantId, paymentRows[0]!.id, invoiceId, received],
+          );
+        }
+
+        // A denied claim on the oldest insured invoice, so the denial-reasons
+        // table has something in it. Denials are where recoverable revenue
+        // hides, and a report that is always empty is never read.
+        if (policy && spec.settled === 0) {
+          await client.query(
+            `INSERT INTO insurance_claims (tenant_id, claim_number, invoice_id, patient_id,
+                                           policy_id, payer_id, claimed_cents, allowed_cents,
+                                           approved_cents, paid_cents, denied_cents, status,
+                                           submitted_at, acknowledged_at, adjudicated_at,
+                                           denial_codes)
+             VALUES ($1, hims_util.allocate_reference($1,'claim','CLM'), $2, $3, $4, $5,
+                     $6, 0, 0, 0, $6, 'denied',
+                     now() - make_interval(days => $7),
+                     now() - make_interval(days => $7) + interval '1 day',
+                     now() - make_interval(days => $8),
+                     $9::jsonb)`,
+            [
+              tenantId,
+              invoiceId,
+              patientId,
+              policy.policyId,
+              policy.payerId,
+              total,
+              spec.issuedDaysAgo,
+              // Adjudicated recently rather than at submission: a payer
+              // takes weeks, and a denial that falls outside the default
+              // reporting window makes the report look empty when it is not.
+              9,
+              JSON.stringify([
+                {
+                  code: 'CO-197',
+                  description: 'Pre-authorisation absent for this service',
+                },
+              ]),
+            ],
+          );
+        }
+      }
+
+      // ---- One emergency access, unreviewed ---------------------------------
+      // Break-glass is only defensible because it is reviewed afterwards, and
+      // the review queue is the first thing an auditor asks for. Seeding an
+      // unreviewed grant means the compliance screen shows the state that
+      // matters — someone opened a record they had no care relationship with,
+      // and nobody has looked at it yet — rather than a reassuring blank.
       await client.query(
-        `INSERT INTO invoice_lines (tenant_id, invoice_id, line_no, service_item_id, description,
-                                    cpt_code, quantity, unit_price_cents, tax_rate, diagnosis_codes)
-         VALUES ($1,$2,1,$3,'General Consultation','99213',1,7500,0,ARRAY['R05.3']),
-                ($1,$2,2,$4,'Chest X-Ray','71046',1,9500,0,ARRAY['R05.3'])`,
-        [tenantId, invoiceRows[0]!.id, serviceIds['CONS-GP'], serviceIds['IMG-CXR']],
-      );
-
-      const { rows: paymentRows } = await client.query<{ id: string }>(
-        `INSERT INTO payments (tenant_id, receipt_number, patient_id, amount_cents, method, received_by)
-         VALUES ($1, hims_util.allocate_reference($1,'receipt','RCP'), $2, 2500, 'card', $3)
-         RETURNING id`,
-        [tenantId, patientIds[0]!, staffIds.billing!.userId],
-      );
-
-      await client.query(
-        `INSERT INTO payment_allocations (tenant_id, payment_id, invoice_id, amount_cents)
-         VALUES ($1,$2,$3,2500)`,
-        [tenantId, paymentRows[0]!.id, invoiceRows[0]!.id],
+        `INSERT INTO break_glass_grants (tenant_id, user_id, patient_id, justification,
+                                         expires_at, created_at)
+         VALUES ($1, $2, $3,
+                 'Unconscious patient brought to casualty with no next of kin present; needed allergy and medication history before giving analgesia.',
+                 now() - interval '19 hours', now() - interval '23 hours')`,
+        [tenantId, staffIds.doctor2!.userId, patientIds[4 % patientIds.length]!],
       );
 
       logger.info(

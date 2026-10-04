@@ -277,6 +277,7 @@ immediately rebookable, and offers it to the waitlist in priority order.
 
 | Method | Path | Permission |
 |---|---|---|
+| `GET` | `/encounters` | `encounter:read` |
 | `POST` | `/encounters` | `encounter:write` |
 | `PATCH` | `/encounters/:id` | `encounter:write` |
 | `POST` | `/encounters/:id/sign` | `encounter:sign` |
@@ -292,6 +293,18 @@ because claims and reporting depend on them.
 note with no assessment, computes the signature hash, and closes the linked
 appointment. After this the database refuses narrative edits — `PATCH` returns
 `RECORD_LOCKED` with *"File an amendment instead."*
+
+`GET /encounters` is a worklist, not a chart. It returns no narrative, so it
+needs no decryption and makes no per-patient access decision — a board left
+open on a ward screen names who is being seen, not what was said. It defaults
+to `status=unsigned` and orders by the worst NEWS2 recorded during the
+encounter, because a deteriorating patient and a routine medication review are
+both "unsigned notes" and the clock is the wrong tiebreak. `mine=true` is
+resolved from the session's own staff profile, never from a supplied id.
+
+`GET /inventory/locations` lists the stores stock can move through, with
+`allows_controlled` — dispensing names the store it picks from, and the ledger
+refuses a controlled movement out of a store that is not authorised for one.
 
 `POST /encounters/vitals` computes BMI (a generated column, so every surface
 shows the same number) and NEWS2 server-side. A score ≥ 5 queues an in-app
@@ -348,6 +361,7 @@ interactions" is more dangerous than its absence.
 | `GET` | `/inventory/stock` | `inventory:read` |
 | `POST` | `/inventory/stock/receive` | `inventory:write` |
 | `POST` | `/inventory/stock/adjust` | `inventory:write` |
+| `GET` | `/inventory/locations` | `inventory:read` |
 | `GET` | `/inventory/alerts` | `inventory:read` |
 | `PATCH` | `/inventory/alerts/:alertId` | `inventory:write` |
 | `POST` | `/inventory/dispense` | `prescription:dispense` |

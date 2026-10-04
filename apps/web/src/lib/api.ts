@@ -385,3 +385,169 @@ export interface AgeingBucket {
   totalCents: number;
   count: number;
 }
+
+/* ---------------------------------------------------------------------------
+ * Tenant, staff, clinical, pharmacy and reporting
+ *
+ * The reporting and worklist endpoints return database rows as they are, in
+ * snake_case, rather than mapping each one into a camelCase DTO. That is a
+ * deliberate line: a report is a projection whose shape belongs to the query,
+ * and interposing a hand-maintained mapping layer over thirty aggregate
+ * columns adds a place for them to drift without adding a guarantee. The
+ * resource endpoints — patients, encounters, prescriptions — do map, because
+ * those shapes are a contract other things depend on.
+ *
+ * Counts arrive as strings: PostgreSQL's count() is bigint, which exceeds
+ * JavaScript's safe integer range, so node-postgres hands it over as text
+ * rather than silently losing precision. Anything consuming one coerces it.
+ * ------------------------------------------------------------------------- */
+
+export interface TenantFacility {
+  id: string;
+  name: string;
+  code: string;
+  kind: string;
+  timezone: string;
+}
+
+export interface TenantDepartment {
+  id: string;
+  name: string;
+  code: string;
+}
+
+export interface TenantProfile {
+  id: string;
+  slug: string;
+  display_name: string;
+  legal_name: string;
+  facility_code: string;
+  timezone: string;
+  locale: string;
+  currency: string;
+  subscription_tier: string;
+  settings: Record<string, unknown>;
+  branding: Record<string, unknown>;
+  facilities: TenantFacility[] | null;
+  departments: TenantDepartment[] | null;
+}
+
+export interface EncounterWorklistItem {
+  id: string;
+  reference: string;
+  started_at: string;
+  ended_at: string | null;
+  encounter_class: string;
+  status: 'draft' | 'in_progress' | 'pending_signature' | 'signed' | 'amended' | 'voided';
+  chief_complaint: string | null;
+  signed_at: string | null;
+  requires_cosign: boolean;
+  cosigned_at: string | null;
+  disposition: string | null;
+  follow_up_in_days: number | null;
+  diagnosis_count: number;
+  patient_id: string;
+  patient_name: string;
+  mrn: string;
+  provider_name: string;
+  department_name: string | null;
+  amendment_count: string;
+  worst_news2: number | null;
+  age_hours: string;
+}
+
+export interface PrescriptionLine {
+  id: string;
+  medicationName: string;
+  strength: string | null;
+  route: string;
+  instructions: string;
+  quantityPrescribed: string;
+  quantityDispensed: string;
+  status: string;
+  controlledSchedule: string | null;
+}
+
+export interface DispenseQueueItem {
+  id: string;
+  reference: string;
+  prescribed_at: string;
+  status: string;
+  patient_name: string;
+  mrn: string;
+  prescriber_name: string;
+  lines_outstanding: string;
+  has_controlled: boolean;
+  needs_cold_chain: boolean;
+  /** Only the lines still to be picked, so the row reads as remaining work. */
+  outstanding_items: PrescriptionLine[];
+}
+
+export interface StaffMember {
+  id: string;
+  staff_number: string;
+  display_name: string;
+  title: string | null;
+  given_name: string;
+  family_name: string;
+  is_provider: boolean;
+  specialties: string[] | null;
+  employment_type: string;
+  is_active: boolean;
+  license_expires_on: string | null;
+  default_slot_minutes: number;
+  accepts_new_patients: boolean;
+  department_name: string | null;
+  facility_name: string | null;
+  email: string | null;
+  account_status: string | null;
+  last_login_at: string | null;
+  roles: RoleKey[] | null;
+  licence_expiring_soon: boolean;
+}
+
+export interface UtilisationRow {
+  provider_id: string;
+  display_name: string;
+  department: string | null;
+  booked: string;
+  completed: string;
+  no_shows: string;
+  cancelled: string;
+  no_show_rate_pct: string | null;
+  avg_slot_minutes: string | null;
+  avg_actual_minutes: string | null;
+}
+
+export interface RevenueReport {
+  byPayer: Array<{
+    payer: string;
+    invoices: string;
+    billed_cents: string | null;
+    collected_cents: string | null;
+    outstanding_cents: string | null;
+    collection_rate_pct: string | null;
+  }>;
+  byServiceCategory: Array<{ category: string | null; net_cents: string | null; units: string | null }>;
+  topDenialReasons: Array<{
+    denial_code: string | null;
+    description: string | null;
+    occurrences: string;
+    denied_cents: string | null;
+  }>;
+  collectionsByMethod: Array<{ method: string; payments: string; total_cents: string | null }>;
+}
+
+export interface BreakGlassGrant {
+  id: string;
+  created_at: string;
+  expires_at: string;
+  justification: string;
+  accessed_by: string;
+  email: string;
+  patient_name: string;
+  mrn: string;
+  reviewed_at: string | null;
+  review_outcome: string | null;
+  actions_taken: string;
+}

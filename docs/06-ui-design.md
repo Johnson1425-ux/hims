@@ -124,4 +124,9 @@ reflowing into unreadable stacks. Verified at 390 × 844.
 | `light-05-appointments`, `dark-05-appointments` | Day board and schedule with check-in |
 | `light-06-inventory`, `dark-06-inventory` | Stock meters with reorder thresholds, controlled-drug badges |
 | `light-07-billing` | AR ageing ordinal bars; note the permission-narrowed sidebar |
+| `light-07-encounters`, `dark-07-encounters` | Worklist ordered by NEWS2, not by clock; unsigned-note ageing |
+| `light-08-dispensing`, `dark-08-dispensing` | Controlled drugs first; the dispense button disabled against a store that cannot hold them |
+| `light-09-staff`, `dark-09-staff` | Directory with licence expiry sorted above the alphabet |
+| `light-10-reports`, `dark-10-reports` | Revenue: payer mix, collection meters, denial reasons, all in TSh |
+| `light-11-settings`, `dark-11-settings` | Hospital profile; the currency field states that it changes scale, not just symbol |
 | `mobile-01-dashboard`, `mobile-02-patients` | 390px ward tablet |

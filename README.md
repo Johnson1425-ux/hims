@@ -409,6 +409,12 @@ PASS  no context leak across transactions; unset context returns zero rows
 | **Billing** | Price snapshotting, trigger-maintained totals, AR ageing, X12-shaped claim construction with pre-submission validation |
 | **Reports** | Read-only transactions, permission-aware projections, HIPAA §164.528 disclosure accounting |
 
+Every screen in the sidebar is built against the live API: patients,
+appointments, encounters, dispensing, inventory, billing, staff, reports and
+settings. Amounts are in Tanzanian shillings, taken from the tenant's own
+`currency` and `locale` — see [`docs/02-data-model.md` § Money](docs/02-data-model.md)
+for why the currency decides the scale and not just the symbol.
+
 ---
 
 ## Screenshots
@@ -417,6 +423,8 @@ PASS  no context leak across transactions; unset context returns zero rows
 |---|---|
 | ![Patient chart](docs/screenshots/light-04-chart.png) | ![Inventory, dark](docs/screenshots/dark-06-inventory.png) |
 | Allergy banner, decrypted PHI, computed BMI and NEWS2, and the access basis shown back to the user | Stock meters with reorder thresholds marked on the track; status carried by glyph and label, never colour alone |
+| ![Encounters](docs/screenshots/light-07-encounters.png) | ![Dispensing](docs/screenshots/light-08-dispensing.png) |
+| Documentation worklist ordered by NEWS2 rather than by clock — the physiology decides, the clock is a tiebreak | Controlled drugs sort first; the dispense button is disabled against a store the stock ledger would refuse |
 
 More in [`docs/screenshots/`](docs/screenshots/), including both themes and a
 390px ward tablet.

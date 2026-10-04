@@ -236,7 +236,8 @@ async function materialiseAppointmentReminders(db: Queryable): Promise<number> {
              'appointment', d.appointment_id,
              'reminder:' || d.id
         FROM due d
-      ON CONFLICT (tenant_id, dedupe_key) DO NOTHING
+      ON CONFLICT (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL
+         DO NOTHING
       RETURNING id
     )
     UPDATE appointment_reminders r

@@ -226,9 +226,24 @@ attacker with the database can see that two patients share a phone number
 
 ## Money
 
-Integer **minor units** (cents) throughout. No floats anywhere — a rounding
-drift of one cent per line across a year of claims is a reconciliation
-nightmare, and payers reject remittances that do not balance to the cent.
+Integer **minor units** throughout, never a float — a rounding drift of one
+unit per line across a year of claims is a reconciliation nightmare, and payers
+reject remittances that do not balance.
+
+How many minor units make a unit is a property of the **currency**, not the
+constant 100, and the `*_cents` suffix means "minor units" rather than
+"hundredths". The deployment currency is the Tanzanian shilling (migration
+`0014`), which is quoted in whole shillings: the senti is long obsolete, and
+ICU's cash-rounding data gives TZS zero fraction digits even though ISO 4217
+still nominally lists two. So for TZS the minor unit **is** the shilling, and
+nothing is divided on the way to a screen.
+
+That rule lives in exactly one place on each side — `apps/web/src/lib/format.ts`
+on the client, the tenant's own `currency` and `locale` columns in the database
+— because getting it wrong is not cosmetic. Dividing by a hundred would state
+every price in the system at a hundredth of its value, on invoices and claims
+alike, and a hospital in Dar es Salaam and one in Nairobi run from the same
+deployment with different answers.
 
 Invoice line arithmetic is in generated columns, so it exists in exactly one
 place:

@@ -7,26 +7,100 @@
  * wrong day.
  */
 
-/** Money arrives as integer minor units and must never pass through a float. */
-export function formatMoney(cents: number | null | undefined, currency = 'USD'): string {
-  if (cents === null || cents === undefined) return '—';
+/* ---------------------------------------------------------------------------
+ * Money
+ *
+ * Amounts are stored as integer MINOR UNITS — the `*_cents` columns — and must
+ * never pass through a float on the way to a screen.
+ *
+ * How many minor units make a unit is a property of the currency, not a
+ * constant 100. The Tanzanian shilling is quoted in whole shillings: the senti
+ * is long obsolete, prices are written TSh 20,000, and ICU's own cash-rounding
+ * data gives TZS zero fraction digits even though ISO 4217 still lists two. So
+ * for TZS the minor unit IS the shilling and there is nothing to divide. Doing
+ * it the other way — dividing by 100 and formatting with two decimals — would
+ * put every amount in this system out by a factor of a hundred and print a
+ * subunit no invoice in the country uses.
+ *
+ * The locale matters as much as the code: only an East African locale renders
+ * TZS as "TSh". Elsewhere it comes out as the bare ISO code.
+ * ------------------------------------------------------------------------- */
 
-  return new Intl.NumberFormat(undefined, {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-  }).format(cents / 100);
+/**
+ * Currencies quoted in whole units, so their minor unit IS the unit.
+ *
+ * All but the first are ISO 4217 exponent 0 — they have no subunit at all.
+ * TZS is the deliberate exception: ISO still lists two decimals for it, but the
+ * senti has been out of use for decades, prices are written TSh 20,000, and
+ * ICU's cash-rounding data gives it zero fraction digits. The Kenyan shilling
+ * is NOT in this list, because its cents are still quoted.
+ */
+const WHOLE_UNIT_CURRENCIES = new Set([
+  'TZS',
+  'UGX', 'RWF', 'BIF', 'DJF', 'GNF', 'KMF', 'XAF', 'XOF', 'XPF',
+  'CLP', 'ISK', 'JPY', 'KRW', 'PYG', 'VND', 'VUV',
+]);
+
+interface MoneyFormat {
+  currency: string;
+  locale: string;
 }
 
-export function formatMoneyCompact(cents: number | null | undefined, currency = 'USD'): string {
-  if (cents === null || cents === undefined) return '—';
+/**
+ * The default, overridden once per session from the tenant's own settings —
+ * the hospital record carries `currency` and `locale`, and a multi-tenant
+ * system has no business hard-coding either.
+ */
+let moneyFormat: MoneyFormat = { currency: 'TZS', locale: 'en-TZ' };
 
-  return new Intl.NumberFormat(undefined, {
+export function setMoneyFormat(format: Partial<MoneyFormat>): void {
+  moneyFormat = {
+    currency: format.currency?.toUpperCase() || moneyFormat.currency,
+    locale: format.locale || moneyFormat.locale,
+  };
+}
+
+export function getMoneyFormat(): MoneyFormat {
+  return moneyFormat;
+}
+
+/** Minor units per unit: 1 for a whole-unit currency, 100 otherwise. */
+function minorUnitsPer(currency: string): number {
+  return WHOLE_UNIT_CURRENCIES.has(currency) ? 1 : 100;
+}
+
+function fractionDigits(currency: string): number {
+  return WHOLE_UNIT_CURRENCIES.has(currency) ? 0 : 2;
+}
+
+export function formatMoney(
+  minorUnits: number | null | undefined,
+  currency = moneyFormat.currency,
+): string {
+  if (minorUnits === null || minorUnits === undefined) return '—';
+
+  const digits = fractionDigits(currency);
+
+  return new Intl.NumberFormat(moneyFormat.locale, {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(minorUnits / minorUnitsPer(currency));
+}
+
+export function formatMoneyCompact(
+  minorUnits: number | null | undefined,
+  currency = moneyFormat.currency,
+): string {
+  if (minorUnits === null || minorUnits === undefined) return '—';
+
+  return new Intl.NumberFormat(moneyFormat.locale, {
     style: 'currency',
     currency,
     notation: 'compact',
     maximumFractionDigits: 1,
-  }).format(cents / 100);
+  }).format(minorUnits / minorUnitsPer(currency));
 }
 
 export function formatNumber(value: number | null | undefined, digits = 0): string {

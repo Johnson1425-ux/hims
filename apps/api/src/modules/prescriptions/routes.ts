@@ -410,7 +410,28 @@ prescriptionRoutes.get(
                   sp.display_name AS prescriber_name,
                   count(pi.id) FILTER (WHERE pi.status <> 'dispensed') AS lines_outstanding,
                   bool_or(i.controlled_schedule IS NOT NULL) AS has_controlled,
-                  bool_or(i.requires_cold_chain) AS needs_cold_chain
+                  bool_or(i.requires_cold_chain) AS needs_cold_chain,
+                  -- The lines themselves, so the screen that dispenses this
+                  -- can show what is being picked and name the line ids
+                  -- without a second round trip per row. Dispensed lines are
+                  -- excluded: they are not work, and a partially dispensed
+                  -- prescription should read as what is left.
+                  COALESCE(
+                    jsonb_agg(
+                      jsonb_build_object(
+                        'id', pi.id,
+                        'medicationName', pi.medication_name,
+                        'strength', pi.strength,
+                        'route', pi.route,
+                        'instructions', pi.instructions,
+                        'quantityPrescribed', pi.quantity_prescribed,
+                        'quantityDispensed', pi.quantity_dispensed,
+                        'status', pi.status,
+                        'controlledSchedule', i.controlled_schedule
+                      ) ORDER BY pi.line_no
+                    ) FILTER (WHERE pi.status <> 'dispensed'),
+                    '[]'::jsonb
+                  ) AS outstanding_items
              FROM prescriptions p
              JOIN patients pt ON pt.id = p.patient_id
              JOIN staff_profiles sp ON sp.id = p.prescriber_id

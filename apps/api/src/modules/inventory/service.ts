@@ -687,7 +687,8 @@ async function raiseAlertsIfBreached(
       `INSERT INTO notifications (tenant_id, channel, template_key, category, priority,
                                   subject, body, payload, dedupe_key)
        VALUES ($1, 'in_app', 'stock_alert', 'inventory', $2, $3, $4, $5, $6)
-       ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`,
+       ON CONFLICT (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL
+         DO NOTHING`,
       [
         tenantId,
         severity === 'critical' ? 2 : 5,
@@ -721,6 +722,35 @@ async function resolveAlertsIfRecovered(
         )`,
     [itemId, locationId],
   );
+}
+
+/**
+ * The stores stock can move in and out of.
+ *
+ * Dispensing has to name the store it dispenses from — stock is held per
+ * location, and FEFO picking happens within one — so a dispensing screen
+ * cannot work without this list. `allows_controlled` is included because it is
+ * the constraint a pharmacist needs before reaching for a controlled drug: the
+ * ledger will refuse the movement from a store that is not authorised for one,
+ * and refusing at the point of selection is kinder than refusing at the point
+ * of dispense.
+ */
+export async function listLocations(req: Request): Promise<Array<Record<string, unknown>>> {
+  return runInTenantReadOnly(req, async ({ db }) => {
+    const { rows } = await db.query<Record<string, unknown>>(
+      `SELECT l.id, l.name, l.code, l.kind, l.allows_controlled, l.temperature_controlled,
+              f.name AS facility_name,
+              (SELECT count(*) FROM stock_batches b
+                WHERE b.location_id = l.id AND b.status = 'available' AND b.quantity_on_hand > 0)
+                AS batches_available
+         FROM inventory_locations l
+         LEFT JOIN facilities f ON f.id = l.facility_id
+        WHERE l.is_active
+        ORDER BY l.kind, l.name`,
+    );
+
+    return rows;
+  });
 }
 
 export async function listAlerts(

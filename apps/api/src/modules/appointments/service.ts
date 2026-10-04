@@ -746,7 +746,8 @@ export async function cancelAppointment(
           `INSERT INTO notifications (tenant_id, patient_id, channel, template_key, category,
                                       priority, payload, dedupe_key)
            VALUES ($1, $2, 'sms', 'waitlist_slot_offer', 'appointment', 2, $3, $4)
-           ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`,
+           ON CONFLICT (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL
+         DO NOTHING`,
           [
             tenantId,
             offer.patient_id,

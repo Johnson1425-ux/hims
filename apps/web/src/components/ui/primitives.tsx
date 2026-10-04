@@ -214,6 +214,31 @@ export function Badge({
  * common dashboard mistake.
  * ======================================================================== */
 
+/**
+ * Headline figures are set by how long they are, not by a fixed size.
+ *
+ * A tile wide enough for "$1,234.56" is not wide enough for "TSh 1,234,567",
+ * and a currency quoted in whole units runs several characters longer than one
+ * with decimals — so a fixed display size silently clips the exact figure the
+ * tile exists to show. Stepping down keeps the number intact, which matters
+ * more than keeping every tile's type at the same size.
+ */
+function headlineSize(value: ReactNode, emphasis: boolean): string {
+  const length =
+    typeof value === 'string' || typeof value === 'number' ? String(value).length : 0;
+
+  if (emphasis) {
+    if (length > 13) return '1.5rem';
+    if (length > 10) return '1.875rem';
+    if (length > 7) return '2.125rem';
+    return '2.5rem';
+  }
+
+  if (length > 15) return '1.25rem';
+  if (length > 11) return '1.5rem';
+  return '1.75rem';
+}
+
 export function StatTile({
   label,
   value,
@@ -256,8 +281,11 @@ export function StatTile({
       </div>
 
       <div
-        className={cx('mt-2 font-semibold tracking-[-0.02em]', emphasis ? 'text-[2.5rem] leading-none' : 'text-[1.75rem] leading-none')}
-        style={{ color: tone === 'neutral' ? 'var(--ink)' : token.fg }}
+        className="mt-2 font-semibold tracking-[-0.02em] leading-none"
+        style={{
+          color: tone === 'neutral' ? 'var(--ink)' : token.fg,
+          fontSize: headlineSize(value, emphasis),
+        }}
       >
         {value}
         {unit ? (

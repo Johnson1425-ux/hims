@@ -56,6 +56,14 @@ export async function dispense(req: Request, res: Response, next: NextFunction):
   }
 }
 
+export async function locations(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    res.json({ data: await service.listLocations(req) });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function alerts(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const rows = await service.listAlerts(req, {

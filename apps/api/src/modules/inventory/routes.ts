@@ -37,6 +37,8 @@ inventoryRoutes.post(
   controller.adjust,
 );
 
+inventoryRoutes.get('/locations', requirePermission('inventory:read'), controller.locations);
+
 inventoryRoutes.get('/alerts', requirePermission('inventory:read'), controller.alerts);
 
 inventoryRoutes.patch(

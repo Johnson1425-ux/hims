@@ -11,18 +11,33 @@ import { z } from 'zod';
 import type { NextFunction, Request, Response } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { requirePermission, requireStaffAccount } from '../../middleware/authorize.js';
-import { body, param, validate } from '../../middleware/validate.js';
+import { body, param, queryParams, validate } from '../../middleware/validate.js';
 import { runInTenant, runInTenantReadOnly } from '../../middleware/tenant.js';
 import { assertPatientAccess } from '../../security/rbac.js';
 import { createFieldCipher } from '../../security/crypto.js';
 import { AppError, NotFoundError } from '../../utils/errors.js';
 import { auditPhiRead } from '../../middleware/audit.js';
 import { createHash } from 'node:crypto';
+import { booleanish } from '../../utils/schema.js';
 
 export const clinicalRoutes = Router();
 clinicalRoutes.use(authenticate, requireStaffAccount());
 
 const encounterIdParam = z.object({ encounterId: z.string().uuid() });
+
+const listEncountersSchema = z.object({
+  /** 'unsigned' is the clinically meaningful default: the documentation debt. */
+  status: z
+    .enum(['open', 'unsigned', 'signed', 'draft', 'in_progress', 'pending_signature', 'all'])
+    .default('unsigned'),
+  patientId: z.string().uuid().optional(),
+  providerId: z.string().uuid().optional(),
+  /** Restrict to the signed-in clinician's own encounters. */
+  mine: booleanish().default(false),
+  overdueHours: z.coerce.number().int().min(0).max(720).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+});
 
 const createEncounterSchema = z.object({
   patientId: z.string().uuid(),
@@ -102,6 +117,117 @@ function news2(v: Record<string, number | undefined>): number {
 
   return Math.min(20, score);
 }
+
+/**
+ * Encounter worklist.
+ *
+ * Deliberately NOT a chart: it returns no narrative, so it needs no decryption
+ * and no per-patient access decision beyond the permission check — and a ward
+ * board left open on a screen shows who is being seen, not what was said.
+ *
+ * The default filter is `unsigned`, because that is the list anyone opening
+ * this screen is actually looking for: an unsigned note is both a compliance
+ * exposure and an unbillable encounter, and the dashboard counts them with
+ * nowhere to send you. Signed notes are read through the patient's chart,
+ * where the access decision and the audit entry belong.
+ */
+clinicalRoutes.get(
+  '/',
+  requirePermission('encounter:read'),
+  validate({ query: listEncountersSchema }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const query = queryParams(req, listEncountersSchema);
+
+      const result = await runInTenantReadOnly(req, async ({ db }, collect) => {
+        const principal = req.principal!;
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+
+        const where = (sql: string, value: unknown) => {
+          params.push(value);
+          conditions.push(sql.replace('$?', `$${params.length}`));
+        };
+
+        const UNSIGNED = "('draft','in_progress','pending_signature')";
+
+        if (query.status === 'unsigned') conditions.push(`e.status IN ${UNSIGNED}`);
+        else if (query.status === 'open') conditions.push("e.ended_at IS NULL AND e.status <> 'voided'");
+        else if (query.status !== 'all') where('e.status = $?', query.status);
+
+        if (query.patientId) where('e.patient_id = $?', query.patientId);
+        if (query.providerId) where('e.provider_id = $?', query.providerId);
+
+        // `mine` is resolved from the session, never from a client-supplied id:
+        // a filter that could be pointed at a colleague would be an access
+        // decision dressed up as a query parameter.
+        if (query.mine) {
+          if (!principal.staffProfileId) {
+            return { items: [], total: 0 };
+          }
+          where('e.provider_id = $?', principal.staffProfileId);
+        }
+
+        if (query.overdueHours !== undefined) {
+          where("e.started_at < now() - make_interval(hours => $?)", query.overdueHours);
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+        const offset = (query.page - 1) * query.pageSize;
+
+        const { rows } = await db.query<Record<string, unknown>>(
+          `SELECT e.id, e.reference, e.started_at, e.ended_at, e.encounter_class, e.status,
+                  e.chief_complaint, e.signed_at, e.requires_cosign, e.cosigned_at,
+                  e.disposition, e.follow_up_in_days,
+                  jsonb_array_length(e.diagnosis_codes) AS diagnosis_count,
+                  e.patient_id, p.full_name AS patient_name, p.mrn,
+                  sp.display_name AS provider_name,
+                  d.name AS department_name,
+                  (SELECT count(*) FROM encounter_amendments a WHERE a.encounter_id = e.id)
+                    AS amendment_count,
+                  -- The worst NEWS2 recorded during the encounter, which is
+                  -- what decides whether this row is the urgent one.
+                  (SELECT max(v.news2_score) FROM vital_signs v WHERE v.encounter_id = e.id)
+                    AS worst_news2,
+                  -- Age, not duration. For an encounter still open these are
+                  -- the same number; for one finished but unsigned, age is how
+                  -- overdue the signature is, which is the question the list
+                  -- is being read to answer.
+                  round(EXTRACT(EPOCH FROM (now() - e.started_at)) / 3600, 1) AS age_hours,
+                  count(*) OVER () AS total_count
+             FROM encounters e
+             JOIN patients p ON p.id = e.patient_id
+             JOIN staff_profiles sp ON sp.id = e.provider_id
+             LEFT JOIN departments d ON d.id = e.department_id
+             ${whereClause}
+            ORDER BY (SELECT max(v.news2_score) FROM vital_signs v WHERE v.encounter_id = e.id)
+                       DESC NULLS LAST,
+                     e.started_at
+            LIMIT ${query.pageSize} OFFSET ${offset}`,
+          params,
+        );
+
+        // A worklist read is a PHI access — it names patients — so it is
+        // audited like one, without a per-row access decision it cannot make.
+        collect({
+          action: 'encounter.worklist_read',
+          resourceType: 'encounter',
+          touchedPhi: true,
+          metadata: { status: query.status, resultCount: rows.length },
+        });
+
+        return { items: rows, total: Number(rows[0]?.total_count ?? 0) };
+      });
+
+      res.json({
+        data: result.items,
+        meta: { total: result.total, page: query.page, pageSize: query.pageSize },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 clinicalRoutes.post(
   '/',
@@ -515,7 +641,8 @@ clinicalRoutes.post(
             `INSERT INTO notifications (tenant_id, patient_id, channel, template_key, category,
                                         priority, subject, body, payload, dedupe_key)
              VALUES ($1, $2, 'in_app', 'early_warning', 'clinical', 1, $3, $4, $5, $6)
-             ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`,
+             ON CONFLICT (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL
+         DO NOTHING`,
             [
               tenantId,
               input.patientId,
