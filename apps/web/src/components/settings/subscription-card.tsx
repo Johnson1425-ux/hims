@@ -23,7 +23,7 @@ import {
   type OwnSubscriptionView,
 } from '@/lib/api';
 import { formatMoney } from '@/lib/format';
-import { Alert, Badge, Button, Card, CardHeader, Skeleton, Table, Td, Th, Tr } from '@/components/ui/primitives';
+import { Alert, Badge, Button, Card, Skeleton, Table, Td, Th, Tr } from '@/components/ui/primitives';
 
 const STATUS_TONE: Record<string, 'neutral' | 'info' | 'good' | 'warning'> = {
   issued: 'info',
@@ -90,8 +90,7 @@ export function SubscriptionCard(): React.ReactNode {
   if (status === 'error') {
     return (
       <Card>
-        <CardHeader title="Your subscription" />
-        <Alert tone="critical" title="Could not be loaded">
+        <Alert tone="critical" title="Your subscription could not be loaded">
           {error ?? 'Please try again.'}
         </Alert>
       </Card>
@@ -106,7 +105,6 @@ export function SubscriptionCard(): React.ReactNode {
   if (!subscription) {
     return (
       <Card>
-        <CardHeader title="Your subscription" subtitle="What this hospital pays for the software" />
         <p className="text-[0.875rem]" style={{ color: 'var(--ink-secondary)' }}>
           No subscription terms have been set up for this hospital yet. Nothing is being billed.
         </p>
@@ -120,10 +118,15 @@ export function SubscriptionCard(): React.ReactNode {
   return (
     <Card padded={false}>
       <div className="p-5 pb-0">
-        <CardHeader
-          title="Your subscription"
-          subtitle="What this hospital pays for the software. Separate from the patient billing screen."
-        />
+        {/*
+          No heading: the tab above already says "Your subscription", and
+          repeating it just pushes the numbers further down. The one thing
+          worth saying here is which of the two billing screens this is.
+        */}
+        <p className="mb-4 text-[0.8125rem]" style={{ color: 'var(--ink-muted)' }}>
+          What this hospital pays for the software. Separate from the Billing screen, which is
+          what your patients owe you.
+        </p>
 
         {error ? (
           <div className="mb-4">
