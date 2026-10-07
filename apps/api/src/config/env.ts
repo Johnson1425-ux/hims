@@ -102,7 +102,7 @@ const schema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
 
-  SMS_PROVIDER: z.enum(['twilio', 'africastalking', '']).default(''),
+  SMS_PROVIDER: z.enum(['twilio', 'nextsms', '']).default(''),
   SMS_FROM: z.string().optional(),
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
