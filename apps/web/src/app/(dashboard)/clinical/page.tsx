@@ -29,6 +29,7 @@ import {
   Skeleton,
   StatTile,
   Table,
+  Tabs,
   Td,
   Th,
   Tr,
@@ -213,28 +214,15 @@ export default function ClinicalPage() {
           className="flex flex-wrap items-center justify-between gap-3 p-4"
           style={{ borderBottom: '1px solid var(--line)' }}
         >
-          <div role="tablist" aria-label="Encounter filter" className="flex flex-wrap gap-1.5">
-            {FILTERS.map((option) => {
-              const active = filter === option.value;
-              return (
-                <button
-                  key={option.value}
-                  role="tab"
-                  aria-selected={active}
-                  title={option.hint}
-                  onClick={() => setFilter(option.value)}
-                  className="rounded-[var(--radius-md)] px-3 py-1.5 text-[0.8125rem] font-medium"
-                  style={{
-                    background: active ? 'var(--accent-soft)' : 'transparent',
-                    color: active ? 'var(--info-ink)' : 'var(--ink-secondary)',
-                    border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
-                  }}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
-          </div>
+          {/* `flush`: this row sits on a card that already provides the
+              surface, so an inactive pill stays transparent. */}
+          <Tabs
+            tabs={FILTERS}
+            value={filter}
+            onChange={setFilter}
+            label="Encounter filter"
+            flush
+          />
 
           {user?.staffProfileId ? (
             <label className="flex items-center gap-2 text-[0.8125rem]" style={{ color: 'var(--ink-secondary)' }}>

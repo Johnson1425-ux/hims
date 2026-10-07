@@ -600,10 +600,79 @@ row. The invoice's `amount_paid_cents` and `status` are maintained by a
 database trigger that recomputes from the payment rows, so a void and an
 insert are the same code path and cannot drift.
 
+#### Getting the invoice to the hospital
+
+Issuing queues **two notifications per hospital administrator** — one
+`in_app`, one `email` — in the same transaction as the invoice itself. Both or
+neither: an invoice nobody is told about is not delivered, and a notification
+for an invoice that rolled back is worse.
+
+Recipients are addressed by **permission, not role**: everyone holding
+`tenant:settings`, which is what already gates the hospital's own
+configuration screen. A hospital that invents a custom admin role gets the
+invoice without anyone updating a list of role names. A hospital with no
+active administrator still gets its invoice — the debt is real — and the run
+result says so, so an operator can send it on by hand.
+
+| Method | Path | Who |
+|---|---|---|
+| `GET` | `/subscription-invoices/:id.pdf?token=…` | **public**, signed link |
+| `GET` | `/platform/billing/invoices/:id.pdf` | operator |
+| `GET` | `/platform/billing/invoices/:id/link` | operator, re-mints the link |
+
+`GET /subscription-invoices/:id.pdf` is **the only unauthenticated route in
+the system**. It has to be: the recipient is clicking from a mail client and
+has neither a bearer token nor a cookie for the API origin, so an ordinary
+authenticated route would simply 401 and the invoice would be undeliverable
+by the one channel it most needs to arrive on.
+
+Authority is an HMAC over the invoice id, the tenant and a 90-day expiry,
+signed with a **subkey derived from `BLIND_INDEX_KEY` under a fixed label**,
+so a signature minted here cannot be presented anywhere else that HMACs with
+that secret. The signed tenant is checked against the row, so a token cannot
+be re-pointed at another hospital's invoice. **The URL is the credential** —
+acceptable for this document, which holds a company name, a period and an
+amount and no patient data of any kind, and would not be for anything else.
+
+The PDF is **generated on demand, never stored**. A subscription invoice is a
+dozen fields; keeping a blob would buy nothing and cost a consistency problem,
+since voiding an invoice or correcting a payment would leave a stored file
+that is now a lie somebody has already downloaded. A settled invoice prints
+PAID IN FULL and omits the bank details entirely — an invoice marked paid that
+still says how to pay invites a second payment — and a voided one prints
+VOID — DO NOT PAY above everything else.
+
 Hospitals may **read** their own subscription rows (`tenant_id`-scoped RLS) and
 write none of them: `INSERT`, `UPDATE` and `DELETE` are revoked from `hims_app`
 on all three tables, so an attempt fails loudly rather than silently matching
 nothing.
+
+#### The hospital's own view
+
+| Method | Path | Permission |
+|---|---|---|
+| `GET` | `/tenant/subscription` | `tenant:settings` |
+| `GET` | `/tenant/subscription/invoices/:id.pdf` | `tenant:settings` |
+
+Served over the **ordinary tenant connection**, not the privileged pool. The
+SELECT-only policies do the scoping, so a hospital naming another hospital's
+invoice id gets a 404 — the row is not visible to the transaction at all, which
+is the same answer RLS gives everywhere else and reveals nothing.
+
+The rate shown is **not read from the price book**: `hims_app` has no SELECT on
+`subscription_plans`, because the vendor's full price list for every tier and
+every customer is none of one hospital's business. It comes from their own
+negotiated rate if there is one, else the amount on the last invoice they were
+actually sent — which is the better answer anyway, being what they have been
+charged rather than what a table says they should be.
+
+Read-only throughout. Terms are a contract between two companies, not a setting.
+
+The PDF here needs **no signed token** because the caller has a session. It is
+fetched with the bearer token and handed to the browser as a blob rather than
+linked: a plain `<a href>` carries no `Authorization` header and comes back 401,
+which is the same trap the emailed signed link exists to avoid for readers with
+no session at all.
 
 **No platform endpoint returns patient data.** The break-glass queue returns
 counts, the clinician's name and whether a review has happened — not the

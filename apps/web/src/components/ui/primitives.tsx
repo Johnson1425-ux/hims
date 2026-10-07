@@ -627,6 +627,150 @@ export function EmptyState({
   );
 }
 
+/* ===========================================================================
+ * Tabs
+ *
+ * The pill row that reports/ and clinical/ had each hand-rolled. Pulled out
+ * at the third use rather than copied again, and upgraded on the way: both
+ * copies were mouse-only — no arrow keys, every tab in the tab order, and
+ * `role="tab"` with nothing tying it to what it controls. A screen-reader
+ * user got a list of buttons.
+ *
+ * ARROW KEYS MOVE AND SELECT (automatic activation), which is the right
+ * pattern when switching costs nothing — everything here is already loaded
+ * or loads in one request. Only the selected tab is in the tab order, so Tab
+ * leaves the row rather than walking through five of them.
+ * ======================================================================== */
+
+export interface TabOption<T extends string> {
+  value: T;
+  label: string;
+  /** Tooltip, for a label that cannot carry the whole meaning. */
+  hint?: string;
+  /** A dot or count. Used on Settings to mark a tab with unsaved edits. */
+  badge?: ReactNode;
+}
+
+export function Tabs<T extends string>({
+  tabs,
+  value,
+  onChange,
+  label,
+  /**
+   * Set when the tabs control panels on the same page, so each tab can point
+   * at its panel. Omitted where the row is really a filter with no panel —
+   * an `aria-controls` aimed at nothing is worse than none.
+   */
+  idPrefix,
+  /** `true` when the row sits on a card that already provides the surface. */
+  flush = false,
+}: {
+  tabs: Array<TabOption<T>>;
+  /**
+   * `null` is allowed and means nothing is selected yet — Reports builds its
+   * tab list from the viewer's permissions and has no section until that
+   * resolves. The row then has no selected tab rather than a wrong one.
+   */
+  value: T | null;
+  onChange: (value: T) => void;
+  label: string;
+  idPrefix?: string;
+  flush?: boolean;
+}): ReactNode {
+  const index = tabs.findIndex((tab) => tab.value === value);
+
+  const move = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End'];
+    if (!keys.includes(event.key) || tabs.length === 0) return;
+
+    event.preventDefault();
+
+    const forward = event.key === 'ArrowRight';
+
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? tabs.length - 1
+          : index === -1
+            ? // Nothing selected yet: an arrow enters the row from the
+              // corresponding end rather than jumping to the middle.
+              (forward ? 0 : tabs.length - 1)
+            : // Wraps, which is what the pattern expects and what makes a
+              // short row quick to cycle.
+              (index + (forward ? 1 : -1) + tabs.length) % tabs.length;
+
+    const target = tabs[next];
+    if (!target) return;
+
+    onChange(target.value);
+    // Focus follows selection, or the keyboard user loses their place.
+    document.getElementById(tabId(idPrefix, target.value))?.focus();
+  };
+
+  return (
+    <div role="tablist" aria-label={label} onKeyDown={move} className="flex flex-wrap gap-1.5">
+      {tabs.map((tab, position) => {
+        const active = tab.value === value;
+
+        return (
+          <button
+            key={tab.value}
+            id={tabId(idPrefix, tab.value)}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            aria-controls={idPrefix ? `${idPrefix}-panel-${tab.value}` : undefined}
+            // With nothing selected the first tab holds the tab stop, so the
+            // row is still reachable by keyboard.
+            tabIndex={active || (index === -1 && position === 0) ? 0 : -1}
+            title={tab.hint}
+            onClick={() => onChange(tab.value)}
+            className="inline-flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-1.5 text-[0.8125rem] font-medium"
+            style={{
+              background: active ? 'var(--accent-soft)' : flush ? 'transparent' : 'var(--surface)',
+              color: active ? 'var(--info-ink)' : 'var(--ink-secondary)',
+              border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
+            }}
+          >
+            {tab.label}
+            {tab.badge}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function tabId(prefix: string | undefined, value: string): string {
+  return `${prefix ?? 'tab'}-tab-${value}`;
+}
+
+/** The region a tab controls. Rendered only when its tab is selected. */
+export function TabPanel({
+  idPrefix,
+  value,
+  children,
+}: {
+  idPrefix: string;
+  value: string;
+  children: ReactNode;
+}): ReactNode {
+  return (
+    <div
+      role="tabpanel"
+      id={`${idPrefix}-panel-${value}`}
+      aria-labelledby={tabId(idPrefix, value)}
+      // Focusable so that tabbing out of the tab row lands in the panel
+      // rather than skipping past it.
+      tabIndex={0}
+      className="outline-none"
+    >
+      {children}
+    </div>
+  );
+}
+
 export function Skeleton({ className, height = 16 }: { className?: string; height?: number }): ReactNode {
   return <div className={cx('skeleton', className)} style={{ height }} aria-hidden="true" />;
 }

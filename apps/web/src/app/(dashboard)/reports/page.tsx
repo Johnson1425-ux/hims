@@ -30,6 +30,7 @@ import {
   Skeleton,
   StatTile,
   Table,
+  Tabs,
   Td,
   Th,
   Tr,
@@ -194,28 +195,13 @@ export default function ReportsPage() {
       />
 
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div role="tablist" aria-label="Report" className="flex flex-wrap gap-1.5">
-          {sections.map((option) => {
-            const active = section === option.value;
-            return (
-              <button
-                key={option.value}
-                role="tab"
-                aria-selected={active}
-                title={option.hint}
-                onClick={() => setSection(option.value)}
-                className="rounded-[var(--radius-md)] px-3 py-1.5 text-[0.8125rem] font-medium"
-                style={{
-                  background: active ? 'var(--accent-soft)' : 'var(--surface)',
-                  color: active ? 'var(--info-ink)' : 'var(--ink-secondary)',
-                  border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
-                }}
-              >
-                {option.label}
-              </button>
-            );
-          })}
-        </div>
+        {/*
+          Shared primitive rather than the hand-rolled row this used to be:
+          same pills, now with arrow-key navigation and a single tab stop.
+          No `idPrefix` — this is a filter, and there is no one panel it
+          controls, so pointing `aria-controls` at something would be a lie.
+        */}
+        <Tabs tabs={sections} value={section} onChange={setSection} label="Report" />
 
         {section !== 'compliance' ? (
           <div className="flex items-end gap-2">

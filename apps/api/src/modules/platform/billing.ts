@@ -17,6 +17,8 @@ import { withoutTenantIsolation } from '../../db/pool.js';
 import { AppError } from '../../utils/errors.js';
 import type { PlatformPrincipal } from '../../middleware/authenticate-platform.js';
 import { recordPlatformAction, type RequestMeta } from './service.js';
+import { invoiceDownloadUrl } from '../../security/download-tokens.js';
+import { logger } from '../../utils/logger.js';
 
 /* ---------------------------------------------------------------------------
  * The price book
@@ -370,7 +372,14 @@ export async function previewDue(): Promise<DueSubscription[]> {
 }
 
 export interface IssueResult {
-  issued: Array<{ tenantName: string; invoiceNumber: string; totalCents: number; currency: string }>;
+  issued: Array<{
+    tenantName: string;
+    invoiceNumber: string;
+    totalCents: number;
+    currency: string;
+    /** How many hospital administrators the invoice was sent to. */
+    notified: number;
+  }>;
   skipped: Array<{ tenantName: string; reason: string }>;
 }
 
@@ -431,6 +440,7 @@ export async function issueDueInvoices(
           total_cents: string;
           period_start: string;
           period_end: string;
+          due_on: string;
         }>(
           `INSERT INTO subscription_invoices
              (tenant_id, invoice_number, tier, period_start, period_end, currency,
@@ -438,7 +448,7 @@ export async function issueDueInvoices(
            VALUES ($1, $2, $3, $4::date,
                    $4::date + CASE WHEN $5 = 'year' THEN interval '1 year' ELSE interval '1 month' END,
                    $6, $7, CURRENT_DATE, CURRENT_DATE + make_interval(days => $8), $9)
-           RETURNING id, invoice_number, total_cents, period_start, period_end`,
+           RETURNING id, invoice_number, total_cents, period_start, period_end, due_on`,
           [
             row.tenant_id,
             numbered[0]!.number,
@@ -474,11 +484,34 @@ export async function issueDueInvoices(
           meta,
         );
 
+        // Queued inside the same transaction as the invoice: both or
+        // neither. An invoice nobody is told about is not delivered.
+        const notified = await notifyInvoiceIssued(db, {
+          id: invoice.id,
+          tenant_id: row.tenant_id,
+          invoice_number: invoice.invoice_number,
+          tier: row.tier,
+          currency: row.currency,
+          total_cents: Number(invoice.total_cents),
+          period_start: invoice.period_start,
+          period_end: invoice.period_end,
+          due_on: invoice.due_on,
+          tenant_name: row.display_name,
+        });
+
+        if (notified === 0) {
+          skipped.push({
+            tenantName: row.display_name,
+            reason: `${invoice.invoice_number} was issued, but this hospital has no active administrator to send it to. Send it on by hand.`,
+          });
+        }
+
         issued.push({
           tenantName: row.display_name,
           invoiceNumber: invoice.invoice_number,
           totalCents: Number(invoice.total_cents),
           currency: row.currency,
+          notified,
         });
       }
 
@@ -504,6 +537,121 @@ export async function issueDueInvoices(
 
     return { issued, skipped };
   });
+}
+
+/* ---------------------------------------------------------------------------
+ * Telling the hospital
+ * ------------------------------------------------------------------------- */
+
+/** Currencies whose smallest unit is the unit. Mirrors the PDF renderer. */
+const ZERO_DECIMAL = new Set(['TZS', 'UGX', 'RWF', 'BIF', 'JPY', 'KRW', 'VND', 'CLP', 'ISK', 'XOF', 'XAF']);
+
+function formatAmount(minorUnits: number, currency: string): string {
+  const digits = ZERO_DECIMAL.has(currency) ? 0 : 2;
+  const value = minorUnits / (digits === 0 ? 1 : 100);
+
+  return `${currency} ${value.toLocaleString('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}`;
+}
+
+function formatDay(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+/**
+ * Queue an in-app and an email notification for every hospital administrator.
+ *
+ * ADDRESSED BY PERMISSION, not by role. `tenant:settings` is what gates the
+ * hospital's own configuration screen, so it is already the answer to "who
+ * here deals with the vendor" — and a hospital that invents a custom role
+ * holding it gets the invoice without anyone remembering to update a list of
+ * role names here.
+ *
+ * Queued in the SAME TRANSACTION as the invoice. An invoice that exists with
+ * nothing queued is one the hospital never hears about; a notification
+ * queued for an invoice that rolled back is worse. Both or neither.
+ *
+ * A failure to find any recipient is logged loudly rather than thrown: the
+ * invoice is still a valid debt, and refusing to bill a hospital because its
+ * last administrator was deactivated would be the wrong way round. It
+ * surfaces in the run result instead.
+ */
+async function notifyInvoiceIssued(
+  db: Queryable,
+  invoice: {
+    id: string;
+    tenant_id: string;
+    invoice_number: string;
+    tier: string;
+    currency: string;
+    total_cents: number;
+    period_start: string;
+    period_end: string;
+    due_on: string;
+    tenant_name: string;
+  },
+): Promise<number> {
+  const { rows: admins } = await db.query<{ id: string }>(
+    `SELECT DISTINCT u.id
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.id
+       JOIN role_permissions rp ON rp.role_id = ur.role_id
+      WHERE u.tenant_id = $1
+        AND u.status = 'active'
+        AND rp.permission_key = 'tenant:settings'
+        AND (ur.expires_at IS NULL OR ur.expires_at > now())`,
+    [invoice.tenant_id],
+  );
+
+  if (admins.length === 0) {
+    logger.warn(
+      { tenantId: invoice.tenant_id, invoiceNumber: invoice.invoice_number },
+      'invoice issued to a hospital with no active administrator; nobody was notified',
+    );
+    return 0;
+  }
+
+  // The link carries its own authority so it opens from a mail client with
+  // no session. See security/download-tokens.ts.
+  const payload = JSON.stringify({
+    invoiceNumber: invoice.invoice_number,
+    hospitalName: invoice.tenant_name,
+    tier: invoice.tier,
+    amount: formatAmount(invoice.total_cents, invoice.currency),
+    dueDate: formatDay(invoice.due_on),
+    periodStart: formatDay(invoice.period_start),
+    periodEnd: formatDay(invoice.period_end),
+    invoiceUrl: invoiceDownloadUrl(invoice.id, invoice.tenant_id),
+  });
+
+  for (const admin of admins) {
+    for (const channel of ['in_app', 'email'] as const) {
+      await db.query(
+        `INSERT INTO notifications
+           (tenant_id, user_id, channel, template_key, category, priority, payload, dedupe_key)
+         VALUES ($1, $2, $3, 'subscription_invoice_issued', 'billing', 4, $4, $5)
+         -- Must name the partial index exactly: uq_notifications_dedupe is
+         -- on (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL, and a
+         -- conflict target that does not match it infers nothing and throws.
+         ON CONFLICT (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
+        [
+          invoice.tenant_id,
+          admin.id,
+          channel,
+          payload,
+          // Re-running the generator must not re-notify. The unique index on
+          // the invoice period already prevents a duplicate invoice; this
+          // guards the case of a retried transaction.
+          `sub-invoice:${invoice.id}:${admin.id}:${channel}`,
+        ],
+      );
+    }
+  }
+
+  return admins.length;
 }
 
 /* ---------------------------------------------------------------------------
@@ -600,6 +748,29 @@ export async function getInvoice(invoiceId: string): Promise<Record<string, unkn
   return withoutTenantIsolation('platform console: reading a subscription invoice', (db) =>
     loadInvoice(db, invoiceId),
   );
+}
+
+/**
+ * Re-mint the signed link for an invoice.
+ *
+ * A fresh token each time rather than a stored one: the link is derived from
+ * the invoice, so there is nothing to keep, and re-sending an expired one
+ * silently would be worse than useless.
+ */
+export async function downloadLink(
+  invoiceId: string,
+): Promise<{ url: string; expiresInDays: number }> {
+  return withoutTenantIsolation('platform console: minting an invoice download link', async (db) => {
+    const { rows } = await db.query<{ tenant_id: string }>(
+      'SELECT tenant_id FROM subscription_invoices WHERE id = $1',
+      [invoiceId],
+    );
+
+    const invoice = rows[0];
+    if (!invoice) throw new AppError(404, 'NOT_FOUND', 'That invoice could not be found.');
+
+    return { url: invoiceDownloadUrl(invoiceId, invoice.tenant_id), expiresInDays: 90 };
+  });
 }
 
 /* ---------------------------------------------------------------------------

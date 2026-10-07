@@ -25,9 +25,17 @@ import { runInTenant, runInTenantReadOnly } from '../../middleware/tenant.js';
 import { booleanish, ianaTimezone } from '../../utils/schema.js';
 import type { Queryable } from '../../db/pool.js';
 import { AppError, NotFoundError } from '../../utils/errors.js';
+import { subscriptionRoutes } from './subscription.js';
 
 export const tenantRoutes = Router();
 tenantRoutes.use(authenticate);
+
+/*
+ * What this hospital pays the vendor. Read-only, gated on tenant:settings,
+ * and served over the ORDINARY tenant connection so row-level security does
+ * the scoping — see ./subscription.ts.
+ */
+tenantRoutes.use('/subscription', subscriptionRoutes);
 
 /* ---------------------------------------------------------------------------
  * Shared field shapes
@@ -417,7 +425,7 @@ tenantRoutes.patch(
         );
 
         const current = existing[0];
-        if (!current) throw new NotFoundError('That site could not be found.');
+        if (!current) throw new NotFoundError('site');
 
         if (input.code !== undefined) {
           await assertCodeFree(db, 'facilities', tenantId, input.code, facilityId);
@@ -581,7 +589,7 @@ tenantRoutes.patch(
           [tenantId, departmentId],
         );
 
-        if (existing.length === 0) throw new NotFoundError('That department could not be found.');
+        if (existing.length === 0) throw new NotFoundError('department');
 
         if (input.code !== undefined) {
           await assertCodeFree(db, 'departments', tenantId, input.code, departmentId);

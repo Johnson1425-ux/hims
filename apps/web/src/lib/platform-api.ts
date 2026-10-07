@@ -139,6 +139,27 @@ async function request<T>(path: string, options: Options = {}): Promise<ApiEnvel
   return (await response.json()) as ApiEnvelope<T>;
 }
 
+/**
+ * Open an invoice PDF in a new tab.
+ *
+ * Fetched rather than linked: the console authenticates with a bearer token
+ * held in memory, so a plain `<a href>` sends no Authorization header and
+ * comes back 401. An earlier version of this WAS a plain link, and it did.
+ */
+export async function openPlatformInvoicePdf(invoiceId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}${API_PREFIX}/billing/invoices/${invoiceId}.pdf`, {
+    headers: platformToken ? { Authorization: `Bearer ${platformToken}` } : {},
+    credentials: 'include',
+    cache: 'no-store',
+  });
+
+  if (!response.ok) throw await parseError(response);
+
+  const objectUrl = URL.createObjectURL(await response.blob());
+  window.open(objectUrl, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
 export const platformApi = {
   get: <T>(path: string, query?: Options['query'], signal?: AbortSignal) =>
     request<T>(path, { method: 'GET', query, signal }),

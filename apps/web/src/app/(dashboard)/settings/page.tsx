@@ -19,6 +19,18 @@
  * broke the appointment board. The list comes from the browser's own zone
  * database — see `TimezoneSelect`.
  *
+ * SPLIT INTO TABS because it had grown into four unrelated jobs on one
+ * scroll: who the hospital is, what sites it has, what it pays, and a pair
+ * of identifiers for support. Nobody arrives here wanting all four, and the
+ * one people came for was below the fold.
+ *
+ * The tab lives in the URL hash, so `/settings#subscription` is a link an
+ * invoice email or a support reply can send someone straight to.
+ *
+ * `<SubscriptionCard>` is the hospital's side of the vendor's billing — what
+ * it pays for the software, which is a different ledger from the Billing
+ * screen (what its patients owe it) and is deliberately read-only here.
+ *
  * Facilities and departments live in `<OrgStructure>`, which owns their
  * loading and editing. They are not read from `useTenant()` here: that holds
  * the active-only lists the pickers elsewhere depend on, and administration
@@ -34,9 +46,12 @@ import {
   CardHeader,
   Input,
   Skeleton,
+  TabPanel,
+  Tabs,
 } from '@/components/ui/primitives';
 import { TimezoneSelect } from '@/components/ui/timezone-select';
 import { OrgStructure } from '@/components/settings/org-structure';
+import { SubscriptionCard } from '@/components/settings/subscription-card';
 import { useSession } from '@/lib/session';
 import { useTenant } from '@/lib/tenant';
 import { ApiError, api, type TenantProfile } from '@/lib/api';
@@ -60,6 +75,9 @@ const LOCALES = [
   { code: 'en-US', label: 'English (United States)' },
 ];
 
+const TAB_VALUES = ['hospital', 'organisation', 'subscription'] as const;
+type SettingsTab = (typeof TAB_VALUES)[number];
+
 export default function SettingsPage() {
   const { can } = useSession();
   const { tenant, status, error: loadError, reload } = useTenant();
@@ -71,6 +89,41 @@ export default function SettingsPage() {
   const [currency, setCurrency] = useState('');
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'good' | 'critical'; text: string } | null>(null);
+
+  /*
+   * The open tab, mirrored into the URL hash.
+   *
+   * Read on mount rather than during render: the server has no hash — it is
+   * never sent in the request — so reading it in the initial state would
+   * make the first client render disagree with the server's and trip
+   * hydration. Starting on 'hospital' and correcting in an effect is the
+   * honest version of that.
+   */
+  const [tab, setTab] = useState<SettingsTab>('hospital');
+
+  useEffect(() => {
+    const apply = () => {
+      const fromHash = window.location.hash.replace('#', '');
+      if (TAB_VALUES.includes(fromHash as SettingsTab)) setTab(fromHash as SettingsTab);
+    };
+
+    apply();
+
+    // Also on `hashchange`, because a URL that differs only in its fragment
+    // is a same-document navigation: the browser does not reload and this
+    // component does not remount. Without this, a `/settings#subscription`
+    // link followed by someone ALREADY on the settings page would change the
+    // address bar and nothing else.
+    window.addEventListener('hashchange', apply);
+    return () => window.removeEventListener('hashchange', apply);
+  }, []);
+
+  const openTab = useCallback((next: SettingsTab) => {
+    setTab(next);
+    // replaceState, not a push: flipping tabs should not fill the back button
+    // with places the user never meant to visit.
+    window.history.replaceState(null, '', `#${next}`);
+  }, []);
 
   /**
    * Seed the form from the server, but only where the SERVER's answer has
@@ -170,19 +223,58 @@ export default function SettingsPage() {
 
   const selectedCurrency = CURRENCIES.find((c) => c.code === currency);
 
+  const tabs = [
+    {
+      value: 'hospital' as const,
+      label: 'Hospital',
+      hint: 'Name, timezone, locale and billing currency',
+      // A dot rather than a word: switching away with unsaved edits keeps
+      // them in state and hides the Save button, so the tab has to say so.
+      badge: dirty ? (
+        <span
+          aria-label="unsaved changes"
+          className="inline-block h-1.5 w-1.5 rounded-full"
+          style={{ background: 'var(--warning)' }}
+        />
+      ) : undefined,
+    },
+    {
+      value: 'organisation' as const,
+      label: 'Sites & departments',
+      hint: 'Where this hospital operates and how it is divided up',
+    },
+    // Only for an administrator: what a hospital pays its software vendor is
+    // not something a clinician needs on screen.
+    ...(editable
+      ? [
+          {
+            value: 'subscription' as const,
+            label: 'Your subscription',
+            hint: 'What this hospital pays for the software',
+          },
+        ]
+      : []),
+  ];
+
   return (
     <>
       <PageHeader
         title="Settings"
         subtitle={`${tenant.legal_name} · ${tenant.facility_code}`}
         actions={
-          editable ? (
+          // Only on the tab it belongs to. A save button in the header of a
+          // tabbed page is a promise it cannot keep on the other tabs.
+          editable && tab === 'hospital' ? (
             <Button variant="primary" disabled={!dirty || saving} loading={saving} onClick={() => void save()}>
               Save changes
             </Button>
           ) : null
         }
       />
+
+      <div className="mb-5">
+        <Tabs tabs={tabs} value={tab} onChange={openTab} label="Settings section" idPrefix="settings" />
+      </div>
 
       {!editable ? (
         <div className="mb-5">
@@ -202,144 +294,156 @@ export default function SettingsPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="Hospital" subtitle="How this hospital is identified across the system" />
+      {tab === 'hospital' ? (
+        <TabPanel idPrefix="settings" value="hospital">
+          <div className="grid gap-5 lg:grid-cols-2">
+            <Card>
+              <CardHeader title="Hospital" subtitle="How this hospital is identified across the system" />
 
-          <div className="flex flex-col gap-4">
-            <Input
-              name="displayName"
-              label="Display name"
-              value={displayName}
-              disabled={!editable}
-              hint="Shown in the header, on invoices and in notifications"
-              onChange={(event) => setDisplayName(event.target.value)}
-            />
+              <div className="flex flex-col gap-4">
+                <Input
+                  name="displayName"
+                  label="Display name"
+                  value={displayName}
+                  disabled={!editable}
+                  hint="Shown in the header, on invoices and in notifications"
+                  onChange={(event) => setDisplayName(event.target.value)}
+                />
 
-            <TimezoneSelect
-              name="timezone"
-              value={timezone}
-              disabled={!editable}
-              hint="Appointment times are stored absolutely and rendered in this zone. A site in a different zone can override it."
-              onChange={setTimezone}
-            />
+                <TimezoneSelect
+                  name="timezone"
+                  value={timezone}
+                  disabled={!editable}
+                  hint="Appointment times are stored absolutely and rendered in this zone. A site in a different zone can override it."
+                  onChange={setTimezone}
+                />
 
-            <div>
-              <label
-                htmlFor="locale"
-                className="mb-1.5 block text-[0.8125rem] font-medium"
-                style={{ color: 'var(--ink-secondary)' }}
-              >
-                Locale
-              </label>
-              <select
-                id="locale"
-                value={locale}
-                disabled={!editable}
-                onChange={(event) => setLocale(event.target.value)}
-                className="h-9.5 w-full rounded-[var(--radius-md)] px-3 text-[0.875rem]"
-                style={{
-                  background: 'var(--surface)',
-                  color: 'var(--ink)',
-                  border: '1px solid var(--line-strong)',
-                }}
-              >
-                {LOCALES.map((option) => (
-                  <option key={option.code} value={option.code}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1.5 text-[0.75rem]" style={{ color: 'var(--ink-muted)' }}>
-                Decides date and number formatting, and whether a currency shows its local symbol
-                or its bare ISO code.
-              </p>
-            </div>
+                <div>
+                  <label
+                    htmlFor="locale"
+                    className="mb-1.5 block text-[0.8125rem] font-medium"
+                    style={{ color: 'var(--ink-secondary)' }}
+                  >
+                    Locale
+                  </label>
+                  <select
+                    id="locale"
+                    value={locale}
+                    disabled={!editable}
+                    onChange={(event) => setLocale(event.target.value)}
+                    className="h-9.5 w-full rounded-[var(--radius-md)] px-3 text-[0.875rem]"
+                    style={{
+                      background: 'var(--surface)',
+                      color: 'var(--ink)',
+                      border: '1px solid var(--line-strong)',
+                    }}
+                  >
+                    {LOCALES.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-[0.75rem]" style={{ color: 'var(--ink-muted)' }}>
+                    Decides date and number formatting, and whether a currency shows its local symbol
+                    or its bare ISO code.
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader title="Currency" subtitle="The symbol and the scale, which are the same decision" />
+
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label
+                    htmlFor="currency"
+                    className="mb-1.5 block text-[0.8125rem] font-medium"
+                    style={{ color: 'var(--ink-secondary)' }}
+                  >
+                    Billing currency
+                  </label>
+                  <select
+                    id="currency"
+                    value={currency}
+                    disabled={!editable}
+                    onChange={(event) => setCurrency(event.target.value)}
+                    className="h-9.5 w-full rounded-[var(--radius-md)] px-3 text-[0.875rem]"
+                    style={{
+                      background: 'var(--surface)',
+                      color: 'var(--ink)',
+                      border: '1px solid var(--line-strong)',
+                    }}
+                  >
+                    {CURRENCIES.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div
+                  className="rounded-[var(--radius-md)] p-3"
+                  style={{ background: 'var(--surface-sunken)' }}
+                >
+                  <p className="text-[0.8125rem]" style={{ color: 'var(--ink-secondary)' }}>
+                    Amounts are held as whole numbers of the smallest unit —{' '}
+                    <strong>{selectedCurrency?.minorUnits ?? 'minor units'}</strong> for{' '}
+                    {currency || 'this currency'} — so money never passes through a decimal.
+                  </p>
+                  <p className="mt-2 text-[0.8125rem]" style={{ color: 'var(--ink-secondary)' }}>
+                    A consultation at the catalogue price renders as{' '}
+                    <strong className="tabular">{formatMoney(20_000, currency || undefined)}</strong>.
+                  </p>
+                </div>
+
+                {currencyChanging ? (
+                  <Alert tone="warning" title="This reinterprets existing amounts">
+                    Changing from {tenant.currency} to {currency} does not convert anything. Every
+                    invoice, payment and price already recorded keeps its stored number and is simply
+                    read in the new currency — and because the scale differs between currencies, the
+                    displayed value can move by a factor of a hundred. Change this on a hospital that
+                    has already billed only alongside a deliberate migration of the amounts.
+                  </Alert>
+                ) : null}
+              </div>
+            </Card>
           </div>
-        </Card>
 
-        <Card>
-          <CardHeader title="Currency" subtitle="The symbol and the scale, which are the same decision" />
-
-          <div className="flex flex-col gap-4">
-            <div>
-              <label
-                htmlFor="currency"
-                className="mb-1.5 block text-[0.8125rem] font-medium"
-                style={{ color: 'var(--ink-secondary)' }}
-              >
-                Billing currency
-              </label>
-              <select
-                id="currency"
-                value={currency}
-                disabled={!editable}
-                onChange={(event) => setCurrency(event.target.value)}
-                className="h-9.5 w-full rounded-[var(--radius-md)] px-3 text-[0.875rem]"
-                style={{
-                  background: 'var(--surface)',
-                  color: 'var(--ink)',
-                  border: '1px solid var(--line-strong)',
-                }}
-              >
-                {CURRENCIES.map((option) => (
-                  <option key={option.code} value={option.code}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div
-              className="rounded-[var(--radius-md)] p-3"
-              style={{ background: 'var(--surface-sunken)' }}
-            >
-              <p className="text-[0.8125rem]" style={{ color: 'var(--ink-secondary)' }}>
-                Amounts are held as whole numbers of the smallest unit —{' '}
-                <strong>{selectedCurrency?.minorUnits ?? 'minor units'}</strong> for{' '}
-                {currency || 'this currency'} — so money never passes through a decimal.
-              </p>
-              <p className="mt-2 text-[0.8125rem]" style={{ color: 'var(--ink-secondary)' }}>
-                A consultation at the catalogue price renders as{' '}
-                <strong className="tabular">{formatMoney(20_000, currency || undefined)}</strong>.
-              </p>
-            </div>
-
-            {currencyChanging ? (
-              <Alert tone="warning" title="This reinterprets existing amounts">
-                Changing from {tenant.currency} to {currency} does not convert anything. Every
-                invoice, payment and price already recorded keeps its stored number and is simply
-                read in the new currency — and because the scale differs between currencies, the
-                displayed value can move by a factor of a hundred. Change this on a hospital that
-                has already billed only alongside a deliberate migration of the amounts.
-              </Alert>
-            ) : null}
+          <div className="mt-5">
+            <Card>
+              <CardHeader title="Identifiers" subtitle="Quote these when contacting support" />
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge tone="info">{humanise(tenant.subscription_tier)}</Badge>
+                <span className="tabular text-[0.8125rem]" style={{ color: 'var(--ink-muted)' }}>
+                  {tenant.slug} · {tenant.id}
+                </span>
+              </div>
+            </Card>
           </div>
-        </Card>
-      </div>
+        </TabPanel>
+      ) : null}
 
-      <div className="mt-5">
-        <OrgStructure
-          editable={editable}
-          tenantTimezone={tenant.timezone}
-          // The app-wide tenant cache holds the active-only facility and
-          // department lists that the booking, registration and stock
-          // pickers read, so a change here has to invalidate it.
-          onChanged={reload}
-        />
-      </div>
+      {tab === 'organisation' ? (
+        <TabPanel idPrefix="settings" value="organisation">
+          <OrgStructure
+            editable={editable}
+            tenantTimezone={tenant.timezone}
+            // The app-wide tenant cache holds the active-only facility and
+            // department lists that the booking, registration and stock
+            // pickers read, so a change here has to invalidate it.
+            onChanged={reload}
+          />
+        </TabPanel>
+      ) : null}
 
-      <div className="mt-5">
-        <Card>
-          <CardHeader title="Plan" subtitle="Not editable from here" />
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge tone="info">{humanise(tenant.subscription_tier)}</Badge>
-            <span className="tabular text-[0.8125rem]" style={{ color: 'var(--ink-muted)' }}>
-              {tenant.slug} · {tenant.id}
-            </span>
-          </div>
-        </Card>
-      </div>
+      {tab === 'subscription' && editable ? (
+        <TabPanel idPrefix="settings" value="subscription">
+          <SubscriptionCard />
+        </TabPanel>
+      ) : null}
     </>
   );
 }

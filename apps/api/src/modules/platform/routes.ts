@@ -27,6 +27,7 @@ import * as service from './service.js';
 import * as tenants from './tenants.js';
 import * as audit from './audit.js';
 import * as billing from './billing.js';
+import { renderInvoicePdf, type InvoiceDocument } from './invoice-pdf.js';
 import {
   acceptInviteSchema,
   auditQuerySchema,
@@ -367,6 +368,42 @@ platformRoutes.get(
   },
 );
 
+/**
+ * The same PDF the hospital receives, for an operator who needs to re-send
+ * it or answer a question about it. Authenticated normally — an operator has
+ * a session, so none of the signed-link machinery applies here.
+ */
+platformRoutes.get(
+  '/billing/invoices/:invoiceId.pdf',
+  validate({ params: invoiceParams }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const invoice = (await billing.getInvoice(param(req, 'invoiceId'))) as
+        | (InvoiceDocument & { invoice_number: string })
+        | null;
+
+      if (!invoice) {
+        res.status(404).json({
+          error: { code: 'NOT_FOUND', message: 'That invoice could not be found.', requestId: req.requestId },
+        });
+        return;
+      }
+
+      const pdf = await renderInvoicePdf(invoice);
+
+      res
+        .status(200)
+        .setHeader('Content-Type', 'application/pdf')
+        .setHeader('Content-Length', String(pdf.length))
+        .setHeader('Content-Disposition', `inline; filename="${invoice.invoice_number}.pdf"`)
+        .setHeader('Cache-Control', 'private, no-store')
+        .end(pdf);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 platformRoutes.get(
   '/billing/invoices/:invoiceId',
   validate({ params: invoiceParams }),
@@ -380,6 +417,20 @@ platformRoutes.get(
         return;
       }
       res.json({ data: invoice });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/** The signed link that was emailed, so an operator can re-send it. */
+platformRoutes.get(
+  '/billing/invoices/:invoiceId/link',
+  validate({ params: invoiceParams }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await billing.downloadLink(param(req, 'invoiceId'));
+      res.json({ data });
     } catch (error) {
       next(error);
     }
