@@ -460,6 +460,87 @@ export interface DepartmentRecord {
   staff_count: string;
 }
 
+/* ---------------------------------------------------------------------------
+ * What this hospital pays the vendor
+ *
+ * The hospital's side of the subscription, read-only. Not to be confused
+ * with the invoices in `/billing`, which are what this hospital's PATIENTS
+ * owe IT. Amounts are integers of the currency's smallest unit, as
+ * everywhere else.
+ * ------------------------------------------------------------------------- */
+
+export interface OwnSubscription {
+  tier: string;
+  currency: string;
+  billing_interval: 'month' | 'year';
+  /** What this hospital is charged. Null before the first invoice. */
+  amount_cents: string | null;
+  current_period_start: string;
+  current_period_end: string;
+  trial_ends_on: string | null;
+  status: 'trialing' | 'active' | 'cancelled';
+}
+
+export interface OwnSubscriptionInvoice {
+  id: string;
+  invoice_number: string;
+  tier: string;
+  period_start: string;
+  period_end: string;
+  currency: string;
+  amount_cents: string;
+  tax_cents: string;
+  total_cents: string;
+  amount_paid_cents: string;
+  balance_cents: string;
+  status: 'issued' | 'partially_paid' | 'paid' | 'void';
+  is_overdue: boolean;
+  days_overdue: number;
+  issued_on: string;
+  due_on: string;
+  void_reason: string | null;
+}
+
+export interface OwnSubscriptionView {
+  subscription: OwnSubscription | null;
+  invoices: OwnSubscriptionInvoice[];
+  outstanding_cents: number;
+  overdue_cents: number;
+}
+
+/**
+ * Open this hospital's copy of an invoice.
+ *
+ * NOT a plain `<a href>`, and that is the point. This API authenticates with
+ * a bearer token held in memory — a link the browser follows carries no
+ * Authorization header and gets a 401, which is exactly the trap the emailed
+ * signed link exists to avoid for people with no session at all. Here the
+ * caller HAS a session, so the fix is to fetch with it and hand the browser
+ * a blob.
+ *
+ * The object URL is revoked on the next tick: the new tab has already taken
+ * its own reference by then, and leaving it alive leaks the document into
+ * memory for as long as the page is open.
+ */
+export async function openOwnInvoicePdf(invoiceId: string): Promise<void> {
+  await openPdf(`${API_BASE}${API_PREFIX}/tenant/subscription/invoices/${invoiceId}.pdf`);
+}
+
+/** Shared by both realms' invoice downloads. */
+export async function openPdf(url: string, token = accessToken): Promise<void> {
+  const response = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+    cache: 'no-store',
+  });
+
+  if (!response.ok) throw await parseError(response);
+
+  const objectUrl = URL.createObjectURL(await response.blob());
+  window.open(objectUrl, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
 export interface TenantProfile {
   id: string;
   slug: string;

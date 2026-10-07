@@ -19,6 +19,10 @@
  * broke the appointment board. The list comes from the browser's own zone
  * database — see `TimezoneSelect`.
  *
+ * `<SubscriptionCard>` is the hospital's side of the vendor's billing — what
+ * it pays for the software, which is a different ledger from the Billing
+ * screen (what its patients owe it) and is deliberately read-only here.
+ *
  * Facilities and departments live in `<OrgStructure>`, which owns their
  * loading and editing. They are not read from `useTenant()` here: that holds
  * the active-only lists the pickers elsewhere depend on, and administration
@@ -37,6 +41,7 @@ import {
 } from '@/components/ui/primitives';
 import { TimezoneSelect } from '@/components/ui/timezone-select';
 import { OrgStructure } from '@/components/settings/org-structure';
+import { SubscriptionCard } from '@/components/settings/subscription-card';
 import { useSession } from '@/lib/session';
 import { useTenant } from '@/lib/tenant';
 import { ApiError, api, type TenantProfile } from '@/lib/api';
@@ -329,9 +334,25 @@ export default function SettingsPage() {
         />
       </div>
 
+      {/*
+        The old "Plan" card showed a tier badge and an opaque uuid and said
+        "not editable from here", which told an administrator nothing they
+        could act on. This is the same fact with the part they actually need:
+        what they pay, what is outstanding, and the invoice itself.
+
+        Gated on the permission rather than on `editable`, because the data
+        is read-only for everyone — but what a hospital pays its vendor is
+        still administrative, not something a clinician needs on screen.
+      */}
+      {editable ? (
+        <div className="mt-5">
+          <SubscriptionCard />
+        </div>
+      ) : null}
+
       <div className="mt-5">
         <Card>
-          <CardHeader title="Plan" subtitle="Not editable from here" />
+          <CardHeader title="Identifiers" subtitle="Quote these when contacting support" />
           <div className="flex flex-wrap items-center gap-3">
             <Badge tone="info">{humanise(tenant.subscription_tier)}</Badge>
             <span className="tabular text-[0.8125rem]" style={{ color: 'var(--ink-muted)' }}>

@@ -21,7 +21,7 @@ import {
   type SubscriptionInvoiceRow,
 } from '@/lib/platform-api';
 
-import { platformInvoicePdfUrl } from '@/lib/platform-api';
+import { openPlatformInvoicePdf } from '@/lib/platform-api';
 import { formatMoney } from '@/lib/format';
 import { ConsoleBadge, ConsoleButton } from './console-shell';
 
@@ -95,7 +95,13 @@ export function RecordPaymentDialog({
   if (!invoice) return null;
 
   const balance = Number(invoice.balance_cents);
-  const pdfHref = platformInvoicePdfUrl(invoice.id);
+  const openPdf = async () => {
+    try {
+      await openPlatformInvoicePdf(invoice.id);
+    } catch {
+      setCopied('Could not open the PDF');
+    }
+  };
 
   /** Mints a FRESH link rather than reusing one: the emailed one may have expired. */
   const copyLink = async () => {
@@ -216,15 +222,7 @@ export function RecordPaymentDialog({
               re-minting it is a real need rather than a convenience.
             */}
             <div className="mt-2 flex flex-wrap gap-2">
-              <a
-                href={pdfHref}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-8 items-center rounded-[6px] px-3 text-[0.8125rem]"
-                style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155' }}
-              >
-                Open the PDF
-              </a>
+              <ConsoleButton onClick={() => void openPdf()}>Open the PDF</ConsoleButton>
               <ConsoleButton onClick={() => void copyLink()}>
                 {copied ?? 'Copy the link we emailed'}
               </ConsoleButton>

@@ -140,12 +140,24 @@ async function request<T>(path: string, options: Options = {}): Promise<ApiEnvel
 }
 
 /**
- * The PDF and the signed link both live on the API origin, not Next's, so a
- * plain relative href would 404. Exported so a component can build the link
- * without duplicating the base URL.
+ * Open an invoice PDF in a new tab.
+ *
+ * Fetched rather than linked: the console authenticates with a bearer token
+ * held in memory, so a plain `<a href>` sends no Authorization header and
+ * comes back 401. An earlier version of this WAS a plain link, and it did.
  */
-export function platformInvoicePdfUrl(invoiceId: string): string {
-  return `${API_BASE}${API_PREFIX}/billing/invoices/${invoiceId}.pdf`;
+export async function openPlatformInvoicePdf(invoiceId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}${API_PREFIX}/billing/invoices/${invoiceId}.pdf`, {
+    headers: platformToken ? { Authorization: `Bearer ${platformToken}` } : {},
+    credentials: 'include',
+    cache: 'no-store',
+  });
+
+  if (!response.ok) throw await parseError(response);
+
+  const objectUrl = URL.createObjectURL(await response.blob());
+  window.open(objectUrl, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
 export const platformApi = {

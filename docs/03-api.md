@@ -647,6 +647,33 @@ write none of them: `INSERT`, `UPDATE` and `DELETE` are revoked from `hims_app`
 on all three tables, so an attempt fails loudly rather than silently matching
 nothing.
 
+#### The hospital's own view
+
+| Method | Path | Permission |
+|---|---|---|
+| `GET` | `/tenant/subscription` | `tenant:settings` |
+| `GET` | `/tenant/subscription/invoices/:id.pdf` | `tenant:settings` |
+
+Served over the **ordinary tenant connection**, not the privileged pool. The
+SELECT-only policies do the scoping, so a hospital naming another hospital's
+invoice id gets a 404 — the row is not visible to the transaction at all, which
+is the same answer RLS gives everywhere else and reveals nothing.
+
+The rate shown is **not read from the price book**: `hims_app` has no SELECT on
+`subscription_plans`, because the vendor's full price list for every tier and
+every customer is none of one hospital's business. It comes from their own
+negotiated rate if there is one, else the amount on the last invoice they were
+actually sent — which is the better answer anyway, being what they have been
+charged rather than what a table says they should be.
+
+Read-only throughout. Terms are a contract between two companies, not a setting.
+
+The PDF here needs **no signed token** because the caller has a session. It is
+fetched with the bearer token and handed to the browser as a blob rather than
+linked: a plain `<a href>` carries no `Authorization` header and comes back 401,
+which is the same trap the emailed signed link exists to avoid for readers with
+no session at all.
+
 **No platform endpoint returns patient data.** The break-glass queue returns
 counts, the clinician's name and whether a review has happened — not the
 patient, not the justification text. A support question that genuinely needs
