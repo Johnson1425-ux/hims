@@ -11,6 +11,18 @@ import { booleanish } from '../utils/schema.js';
 
 loadEnv();
 
+/**
+ * An env value that is meant to span lines.
+ *
+ * dotenv does not read an unquoted multi-line value — it takes the first line
+ * and silently drops the rest, which is how a three-line postal address ends
+ * up on an invoice as one line. So `\n` is accepted as an escape and
+ * normalised here, and a genuinely quoted multi-line value still works.
+ */
+function multiline() {
+  return z.string().max(600).transform((value) => value.replace(/\\n/g, '\n'));
+}
+
 const PLACEHOLDERS = [
   'replace-with-32-byte-base64-key',
   'replace-with-long-random-secret',
@@ -83,6 +95,16 @@ const schema = z.object({
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('7d'),
   SESSION_IDLE_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(15),
+
+  /* ---- What goes on a subscription invoice ------------------------------
+   * The vendor's own identity, printed on the PDF the hospital receives.
+   * Defaults are obviously placeholders rather than plausible-looking ones,
+   * so an unconfigured deployment produces an invoice nobody would mistake
+   * for a real bill. */
+  INVOICE_VENDOR_NAME: z.string().max(120).default('[Configure INVOICE_VENDOR_NAME]'),
+  INVOICE_VENDOR_ADDRESS: multiline().default('[Configure INVOICE_VENDOR_ADDRESS]'),
+  /** Bank or mobile-money details. Omitted from the PDF when unset. */
+  INVOICE_PAYMENT_DETAILS: multiline().optional(),
 
   MAX_FAILED_LOGINS: z.coerce.number().int().positive().default(5),
   ACCOUNT_LOCK_MINUTES: z.coerce.number().int().positive().default(15),

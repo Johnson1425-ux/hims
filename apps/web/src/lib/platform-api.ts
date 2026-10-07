@@ -139,6 +139,15 @@ async function request<T>(path: string, options: Options = {}): Promise<ApiEnvel
   return (await response.json()) as ApiEnvelope<T>;
 }
 
+/**
+ * The PDF and the signed link both live on the API origin, not Next's, so a
+ * plain relative href would 404. Exported so a component can build the link
+ * without duplicating the base URL.
+ */
+export function platformInvoicePdfUrl(invoiceId: string): string {
+  return `${API_BASE}${API_PREFIX}/billing/invoices/${invoiceId}.pdf`;
+}
+
 export const platformApi = {
   get: <T>(path: string, query?: Options['query'], signal?: AbortSignal) =>
     request<T>(path, { method: 'GET', query, signal }),

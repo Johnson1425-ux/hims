@@ -17,6 +17,7 @@ import { staffRoutes } from './staff/routes.js';
 import { notificationRoutes } from './notifications/routes.js';
 import { reportRoutes } from './reports/routes.js';
 import { tenantRoutes } from './tenants/routes.js';
+import { subscriptionDocumentRoutes } from './subscription-documents/routes.js';
 import { platformRoutes } from './platform/routes.js';
 import { platformConsoleEnabled } from '../config/env.js';
 import { logger } from '../utils/logger.js';
@@ -34,6 +35,17 @@ apiRouter.use('/staff', staffRoutes);
 apiRouter.use('/notifications', notificationRoutes);
 apiRouter.use('/reports', reportRoutes);
 apiRouter.use('/tenant', tenantRoutes);
+
+/*
+ * PUBLIC, and the only router here that is.
+ *
+ * Serves a subscription invoice PDF to the holder of a signed link, because
+ * the recipient is clicking from an email and has no session. Authority is
+ * the HMAC in the query string rather than a bearer token — see
+ * `security/download-tokens.ts` for why that is acceptable for this one
+ * document and for nothing else.
+ */
+apiRouter.use('/subscription-invoices', subscriptionDocumentRoutes);
 
 /*
  * The vendor console, mounted only where the deployment asked for it.

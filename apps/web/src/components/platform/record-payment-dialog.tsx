@@ -20,6 +20,8 @@ import {
   platformApi,
   type SubscriptionInvoiceRow,
 } from '@/lib/platform-api';
+
+import { platformInvoicePdfUrl } from '@/lib/platform-api';
 import { formatMoney } from '@/lib/format';
 import { ConsoleBadge, ConsoleButton } from './console-shell';
 
@@ -56,6 +58,7 @@ export function RecordPaymentDialog({
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [detail, setDetail] = useState<SubscriptionInvoiceRow | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
   // Re-seeded on open, and the full history is fetched so the operator can
   // see what has already been recorded before adding to it.
@@ -70,6 +73,7 @@ export function RecordPaymentDialog({
     setErrors({});
     setMessage(null);
     setDetail(null);
+    setCopied(null);
 
     const controller = new AbortController();
     void (async () => {
@@ -91,6 +95,20 @@ export function RecordPaymentDialog({
   if (!invoice) return null;
 
   const balance = Number(invoice.balance_cents);
+  const pdfHref = platformInvoicePdfUrl(invoice.id);
+
+  /** Mints a FRESH link rather than reusing one: the emailed one may have expired. */
+  const copyLink = async () => {
+    try {
+      const { data } = await platformApi.get<{ url: string; expiresInDays: number }>(
+        `/billing/invoices/${invoice.id}/link`,
+      );
+      await navigator.clipboard?.writeText(data.url);
+      setCopied(`Copied — valid ${data.expiresInDays} days`);
+    } catch {
+      setCopied('Could not copy');
+    }
+  };
   const parsed = Number(amount);
   const invalidAmount = !Number.isInteger(parsed) || parsed <= 0 || parsed > balance;
 
@@ -189,6 +207,27 @@ export function RecordPaymentDialog({
                 </strong>
               </span>
               {invoice.is_overdue ? <ConsoleBadge value="overdue" /> : null}
+            </div>
+
+            {/*
+              The two things an operator reaches for when a hospital says they
+              never got the invoice: look at what was sent, and get a fresh
+              link to re-send. The emailed link expires after 90 days, so
+              re-minting it is a real need rather than a convenience.
+            */}
+            <div className="mt-2 flex flex-wrap gap-2">
+              <a
+                href={pdfHref}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-8 items-center rounded-[6px] px-3 text-[0.8125rem]"
+                style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155' }}
+              >
+                Open the PDF
+              </a>
+              <ConsoleButton onClick={() => void copyLink()}>
+                {copied ?? 'Copy the link we emailed'}
+              </ConsoleButton>
             </div>
           </div>
 
