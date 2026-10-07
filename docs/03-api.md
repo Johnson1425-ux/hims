@@ -548,6 +548,63 @@ email in `actor_label`. A hospital reading its own trail therefore sees what
 the vendor did to its account, and sees nothing of what the vendor did to
 anyone else's.
 
+### Subscription billing
+
+The vendor's own books — what each hospital pays for the software. Entirely
+separate from `/billing`, which is what a patient owes a hospital.
+
+| Method | Path |
+|---|---|
+| `GET` | `/platform/billing/summary` |
+| `GET` | `/platform/billing/plans` |
+| `PATCH` | `/platform/billing/plans/:planId` |
+| `GET` | `/platform/billing/due` |
+| `POST` | `/platform/billing/run` |
+| `GET` | `/platform/billing/invoices` |
+| `GET` | `/platform/billing/invoices/:invoiceId` |
+| `POST` | `/platform/billing/invoices/:invoiceId/payments` |
+| `POST` | `/platform/billing/invoices/:invoiceId/void` |
+| `POST` | `/platform/billing/payments/:paymentId/void` |
+| `GET` | `/platform/tenants/:tenantId/subscription` |
+| `PUT` | `/platform/tenants/:tenantId/subscription` |
+
+A **flat fee per tier**, from `subscription_plans`, overridable per hospital
+with `tenant_subscriptions.amount_cents`. NULL there means "follow the price
+book"; a number is a negotiated contract and deliberately does not move when
+the book does.
+
+**An invoice snapshots its price.** Raising a tier next quarter must not
+restate an invoice already sent, so the amount and currency are copied at
+issue. The vendor's billing currency is also independent of the hospital's
+clinical one — a hospital bills patients in TZS and may pay the vendor in USD.
+
+**`POST /billing/run` catches up completely.** A hospital three periods behind
+gets three invoices in one run, so the run leaves nothing due and pressing it
+twice is a no-op. `GET /billing/due` shows what it would issue, including
+`periods_due`, before anything is created. A unique index on
+`(tenant_id, period_start, period_end)` is the backstop against two operators
+pressing it at once.
+
+**Overdue is derived, never stored** — "issued, past due, not settled", a
+function of today's date. `v_subscription_invoice_status` computes it and
+`days_overdue`, so nothing has to be scheduled to keep a flag honest. Nothing
+is automated off the back of it: an overdue hospital is flagged in the console
+and keeps working, because an automated lockout of a clinical system would put
+a clinician between a patient and their chart over a billing dispute.
+
+**Payments are recorded by hand.** There is no payment provider and no card
+data in the schema; the hospital pays by transfer or mobile money and an
+operator records that it arrived. A payment cannot exceed the outstanding
+balance, and corrections are made by voiding — never by deletion or a negative
+row. The invoice's `amount_paid_cents` and `status` are maintained by a
+database trigger that recomputes from the payment rows, so a void and an
+insert are the same code path and cannot drift.
+
+Hospitals may **read** their own subscription rows (`tenant_id`-scoped RLS) and
+write none of them: `INSERT`, `UPDATE` and `DELETE` are revoked from `hims_app`
+on all three tables, so an attempt fails loudly rather than silently matching
+nothing.
+
 **No platform endpoint returns patient data.** The break-glass queue returns
 counts, the clinician's name and whether a review has happened — not the
 patient, not the justification text. A support question that genuinely needs

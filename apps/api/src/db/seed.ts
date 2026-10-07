@@ -144,6 +144,23 @@ async function main(): Promise<void> {
         ],
       );
 
+      // Subscription terms, so a seeded deployment has something for the
+      // console's billing run to find. The seed creates tenants directly
+      // rather than through provisioning, so it has to do this itself.
+      //
+      // Mercy is put a month in arrears on purpose: a billing screen with
+      // nothing overdue on it never gets looked at properly, and the overdue
+      // path is the one worth seeing work.
+      await client.query(
+        `INSERT INTO tenant_subscriptions
+           (tenant_id, currency, billing_interval, current_period_start, current_period_end, status)
+         VALUES ($1, 'TZS', 'month',
+                 CURRENT_DATE - interval '2 months',
+                 CURRENT_DATE - CASE WHEN $2 THEN interval '45 days' ELSE interval '0 days' END,
+                 'active')`,
+        [tenantId, tenant.slug === 'mercy'],
+      );
+
       // Everything below runs with tenant context set, so the seed exercises
       // the same RLS path the application does.
       await client.query('SELECT hims_util.set_request_context($1, NULL, false)', [tenantId]);

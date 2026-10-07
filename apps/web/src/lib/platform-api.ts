@@ -92,7 +92,7 @@ async function refreshSession(): Promise<boolean> {
 }
 
 interface Options {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined | null>;
   signal?: AbortSignal;
@@ -144,6 +144,7 @@ export const platformApi = {
     request<T>(path, { method: 'GET', query, signal }),
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PATCH', body }),
+  put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body }),
   refresh: refreshSession,
 };
 
@@ -240,4 +241,116 @@ export interface BreakGlassRow {
   tenant_slug: string;
   tenant_name: string;
   still_active: boolean;
+}
+
+/* ---------------------------------------------------------------------------
+ * Subscription billing
+ *
+ * Every amount is an integer of the currency's smallest unit, and every one
+ * carries its own `currency` — the vendor may bill one hospital in TZS and
+ * another in USD, and those scales differ. Render with
+ * `formatMoney(amount, currency)`; never add two of these together without
+ * checking they match.
+ * ------------------------------------------------------------------------- */
+
+export interface PlanRow {
+  id: string;
+  tier: 'trial' | 'standard' | 'enterprise';
+  currency: string;
+  amount_cents: string;
+  billing_interval: 'month' | 'year';
+  payment_terms_days: number;
+  description: string | null;
+  is_active: boolean;
+  updated_at: string;
+}
+
+export interface DueRow {
+  tenant_id: string;
+  display_name: string;
+  slug: string;
+  tier: string;
+  currency: string;
+  amount_cents: string;
+  current_period_end: string;
+  periods_due: number;
+}
+
+export interface SubscriptionRow {
+  tenant_id: string;
+  tier: string;
+  currency: string;
+  billing_interval: 'month' | 'year';
+  /** NULL means "follow the price book". A number is a negotiated rate. */
+  override_cents: string | null;
+  override_terms_days: number | null;
+  effective_amount_cents: string | null;
+  has_negotiated_rate: boolean;
+  current_period_start: string;
+  current_period_end: string;
+  trial_ends_on: string | null;
+  status: 'trialing' | 'active' | 'cancelled';
+  cancelled_on: string | null;
+  notes: string | null;
+  invoice_count: string;
+  outstanding_cents: string;
+  overdue_cents: string;
+}
+
+export interface SubscriptionPaymentRow {
+  id: string;
+  amount_cents: string;
+  currency: string;
+  received_on: string;
+  method: string;
+  reference: string | null;
+  notes: string | null;
+  voided_at: string | null;
+  void_reason: string | null;
+  recorded_by_email: string | null;
+  created_at: string;
+}
+
+export interface SubscriptionInvoiceRow {
+  id: string;
+  invoice_number: string;
+  tenant_id: string;
+  tenant_name: string;
+  tenant_slug: string;
+  tenant_status?: string;
+  tier: string;
+  period_start: string;
+  period_end: string;
+  currency: string;
+  amount_cents: string;
+  tax_cents: string;
+  total_cents: string;
+  amount_paid_cents: string;
+  balance_cents: string;
+  status: 'issued' | 'partially_paid' | 'paid' | 'void';
+  /** Derived from today's date, never stored. */
+  is_overdue: boolean;
+  days_overdue: number;
+  issued_on: string;
+  due_on: string;
+  void_reason: string | null;
+  notes: string | null;
+  issued_by_email?: string | null;
+  payments?: SubscriptionPaymentRow[];
+}
+
+export interface RevenueRow {
+  currency: string;
+  active_subscriptions: string;
+  trialing: string;
+  /** Monthly recurring revenue, with annual plans divided by twelve. */
+  mrr_cents: string;
+  outstanding_cents: string;
+  overdue_cents: string;
+  overdue_invoice_count: string;
+}
+
+export interface BillingRunResult {
+  issued: Array<{ tenantName: string; invoiceNumber: string; totalCents: number; currency: string }>;
+  skipped: Array<{ tenantName: string; reason: string }>;
 }

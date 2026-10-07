@@ -22,6 +22,7 @@ import { usePlatformSession } from '@/lib/platform-session';
 
 const NAV = [
   { href: '/platform', label: 'Hospitals', exact: true },
+  { href: '/platform/billing', label: 'Billing' },
   { href: '/platform/operators', label: 'Operators' },
   { href: '/platform/audit', label: 'Audit' },
 ];
@@ -169,6 +170,15 @@ const STATUS_COLOURS: Record<string, { bg: string; fg: string }> = {
   archived: { bg: '#334155', fg: '#cbd5e1' },
   invited: { bg: '#1e3a5f', fg: '#93c5fd' },
   trial: { bg: '#3b2f14', fg: '#fcd34d' },
+  // Billing states. `overdue` is amber rather than red: it is a conversation
+  // to have with a customer, not an incident.
+  overdue: { bg: '#78350f', fg: '#fde68a' },
+  issued: { bg: '#1e293b', fg: '#cbd5e1' },
+  partially_paid: { bg: '#1e3a5f', fg: '#93c5fd' },
+  paid: { bg: '#064e3b', fg: '#6ee7b7' },
+  void: { bg: '#27272a', fg: '#a1a1aa' },
+  cancelled: { bg: '#27272a', fg: '#a1a1aa' },
+  trialing: { bg: '#3b2f14', fg: '#fcd34d' },
   standard: { bg: '#1e293b', fg: '#cbd5e1' },
   enterprise: { bg: '#312e81', fg: '#c7d2fe' },
 };

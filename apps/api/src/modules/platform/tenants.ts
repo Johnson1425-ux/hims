@@ -250,6 +250,28 @@ export async function provisionTenant(
       [userId],
     );
 
+    // Terms, so the hospital is visible to the billing run from day one. A
+    // tenant with no subscription row is one nobody ever invoices, and that
+    // only shows up as a revenue hole months later.
+    //
+    // `current_period_end` is "paid up to": today, so the first run bills the
+    // month ahead rather than backdating. A trial is created `trialing`, which
+    // the generator skips entirely.
+    await db.query(
+      `INSERT INTO tenant_subscriptions
+         (tenant_id, currency, billing_interval, current_period_start, current_period_end,
+          trial_ends_on, status)
+       VALUES ($1, $2, 'month', CURRENT_DATE - interval '1 month', CURRENT_DATE, $3, $4)`,
+      [
+        tenantId,
+        // The vendor bills in the hospital's own currency unless an operator
+        // changes it afterwards, which is right far more often than not.
+        input.currency,
+        input.subscriptionTier === 'trial' ? new Date(Date.now() + 30 * 86_400_000) : null,
+        input.subscriptionTier === 'trial' ? 'trialing' : 'active',
+      ],
+    );
+
     const inviteToken = randomToken(32);
     await db.query(
       `INSERT INTO auth_tokens (user_id, purpose, token_hash, expires_at)

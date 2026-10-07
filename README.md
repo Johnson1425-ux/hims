@@ -179,6 +179,15 @@ purpose: a fixed dark chrome and a standing banner, because an operator who
 cannot tell at a glance which of the two they are in will eventually act in the
 wrong one.
 
+It also keeps the vendor's books: a flat fee per tier (overridable per
+hospital for a negotiated contract), invoices issued one period at a time, and
+payments recorded by hand — the hospital pays by transfer or mobile money and
+an operator writes down that it arrived. There is no payment provider wired in
+and no card data in the schema. An overdue hospital is **flagged and keeps
+working**: automatically locking a clinical system over a billing dispute would
+put a clinician between a patient and their chart, so suspension stays a
+deliberate, reasoned, audited decision.
+
 A platform operator is **not** a user of any hospital. Separate table, separate
 sessions, separate signing key — a staff account cannot sign in to the console
 and a console account cannot sign in to a hospital. Every action is written to

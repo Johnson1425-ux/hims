@@ -21,6 +21,7 @@ import {
   type TenantDetail,
   type TenantStatus,
 } from '@/lib/platform-api';
+import { SubscriptionPanel } from '@/components/platform/subscription-panel';
 import {
   ConsoleBadge,
   ConsoleButton,
@@ -279,6 +280,10 @@ function TenantDetailView({ tenantId }: { tenantId: string }) {
             </div>
           )}
         </ConsoleCard>
+      </div>
+
+      <div className="mt-5">
+        <SubscriptionPanel tenantId={tenantId} />
       </div>
 
       <div className="mt-5">
