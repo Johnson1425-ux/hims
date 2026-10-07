@@ -159,19 +159,68 @@ export async function withTenant<T>(
   throw new InternalError(new Error('transaction retry loop exhausted'));
 }
 
+/* ---------------------------------------------------------------------------
+ * The privileged pool
+ *
+ * `hims_app` has no BYPASSRLS, which is the whole point of it — so a function
+ * that claims to work across tenants cannot be served from the same pool. It
+ * needs `hims_platform`, on its own connection string.
+ *
+ * Created lazily and only when `DATABASE_PLATFORM_URL` is set: a deployment
+ * that has not deliberately turned on cross-tenant access should not be
+ * holding open a connection capable of it. Kept small for the same reason —
+ * this pool exists for a handful of support operations, not for traffic.
+ * ------------------------------------------------------------------------- */
+
+let privilegedPool: Pool | null = null;
+
+function platformPool(): Pool {
+  if (!env.DATABASE_PLATFORM_URL) {
+    throw new InternalError(
+      new Error('DATABASE_PLATFORM_URL is not configured; cross-tenant access is unavailable'),
+    );
+  }
+
+  privilegedPool ??= new Pool({
+    connectionString: env.DATABASE_PLATFORM_URL,
+    max: Math.min(5, env.DATABASE_POOL_MAX),
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+    ssl: env.DATABASE_SSL ? { rejectUnauthorized: true } : undefined,
+    statement_timeout: env.DATABASE_STATEMENT_TIMEOUT_MS,
+    query_timeout: env.DATABASE_STATEMENT_TIMEOUT_MS,
+    // Distinct in pg_stat_activity, so a cross-tenant query is identifiable
+    // in the logs of a database that should mostly not be serving them.
+    application_name: 'hims-platform',
+  });
+
+  privilegedPool.on('error', (err) => {
+    logger.error({ err }, 'idle platform database client errored');
+  });
+
+  return privilegedPool;
+}
+
+/** Whether cross-tenant access is available in this deployment. */
+export function hasPlatformConnection(): boolean {
+  return Boolean(env.DATABASE_PLATFORM_URL);
+}
+
 /**
- * Cross-tenant work: nightly rollups, platform support, the notification
+ * Cross-tenant work: the vendor console, nightly rollups, the notification
  * worker draining every tenant's outbox.
  *
- * Requires a connection whose role holds BYPASSRLS (`hims_platform`). Every
- * call site must be able to justify itself in a security review, which is why
- * this function demands a written reason and logs it.
+ * Runs on the BYPASSRLS pool above. It previously ran on the ordinary `pool`
+ * despite a comment promising otherwise, so it did NOT in fact escape row
+ * level security — every call was silently filtered to nothing. Every call
+ * site must be able to justify itself in a security review, which is why this
+ * demands a written reason and logs it.
  */
 export async function withoutTenantIsolation<T>(
   reason: string,
   fn: (db: Queryable) => Promise<T>,
 ): Promise<T> {
-  const client = await pool.connect();
+  const client = await platformPool().connect();
   logger.warn({ reason }, 'running a query outside tenant isolation');
 
   try {
@@ -202,6 +251,10 @@ export async function checkDatabase(): Promise<{ ok: boolean; latencyMs: number 
 
 export async function closePool(): Promise<void> {
   await pool.end();
+  if (privilegedPool) {
+    await privilegedPool.end();
+    privilegedPool = null;
+  }
 }
 
 /* ---------------------------------------------------------------------------

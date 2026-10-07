@@ -63,12 +63,77 @@ the basis is recorded.*
 `platform_admin` from inside a tenant. Without it, `staff:write` is quietly
 "become anyone".
 
+That refusal is only worth something because the vendor realm genuinely lives
+elsewhere. A platform operator is a row in `platform_users`, not `users`; they
+authenticate against `platform_sessions`, not `auth_sessions`; their token is
+signed with a third secret and carries `aud: hims:platform`. There is no edge
+between the two graphs, so no sequence of role grants inside a hospital can
+produce one. `hims_app` is explicitly REVOKEd from both platform tables, so the
+role that serves hospital traffic cannot so much as read an operator's password
+hash.
+
+*Verified: a hospital access token presented to `/platform/*` is refused at
+signature verification, and a console token presented to `/patients` likewise.*
+
+### The vendor's reach, and its limits
+
+`hims_platform` holds `BYPASSRLS` and is the connection behind the console, so
+the honest question is not whether it *can* read a chart but whether anything
+asks it to. Nothing does: the console provisions hospitals, moves them between
+lifecycle states, manages its own operators, and reads audit metadata. The
+break-glass oversight queue returns the clinician, the date and the review
+state — never the patient, never the justification text.
+
+Every console action is written to `audit_events` with `platform_actor_id` set,
+which means two things at once: it joins the same hash chain as the clinical
+path, and **the hospital can see it**. A customer reading their own audit trail
+sees what the vendor did to their account, and nothing of what the vendor did to
+anyone else's.
+
+*Verified: KCMC's trail shows the three vendor actions taken against KCMC;
+Mercy's shows none of them.*
+
+## 2b. The audit chain, and two ways it was not working
+
+The trail is hash-chained: each row commits to the previous row's digest, so an
+edited or deleted row breaks verification from that point on. Two defects meant
+that guarantee was not being delivered, both found while building the console
+and both fixed in `0016`.
+
+**The chain forked at every tenant boundary.** `chain_audit_event()` found the
+row to chain onto with `SELECT event_hash FROM audit_events ORDER BY id DESC
+LIMIT 1` — inside a trigger, and therefore subject to the same RLS policy as any
+other read. The first event for a new tenant saw nothing, took `prev_hash :=
+NULL`, and wrote itself as a second genesis block. Every hospital had its own
+private chain, and `verify_audit_chain()` reported the first fork and stopped —
+so the trail stopped being verifiable at the first tenant boundary rather than
+at the first tampered row. The tail now lives in a one-row `audit_chain_head`
+table with no tenant column and no policy, so the lookup returns the same answer
+whoever is inserting.
+
+**Verification passed vacuously.** `verify_audit_chain()` reads `audit_events`
+as the caller, and `pnpm db:verify` ran it on the migration connection — which
+FORCE'd RLS filters to zero rows. It walked nothing, returned nothing, and was
+reported as "audit chain unbroken" every time. The function now raises if the
+newest row the head knows about is not visible to the caller, and `db:verify`
+runs the check on the platform connection or reports it as NOT CHECKED. A
+verifier that cannot fail is worse than no verifier, because it is believed.
+
+*Verified: alternating logins across two tenants now produce one chain with a
+single genesis row; running the verifier as the migration role raises rather
+than passing.*
+
+---
+
 ## 3. Tenant isolation
 
 The threat is a single forgotten `WHERE tenant_id = ?`. Four defences:
 
 1. **RLS, FORCE'd on all 65 tenant tables.** The API connects as `hims_app`,
    which has no `BYPASSRLS`. With no context, queries return nothing.
+   `withoutTenantIsolation()` is the one sanctioned escape, it now genuinely
+   runs on `hims_platform` rather than only claiming to, and it demands a
+   written reason that is logged at warn level on every call.
 2. **Transaction-scoped context.** `set_config(..., is_local => true)` means the
    setting cannot outlive the transaction and leak through a pooled connection.
 3. **Per-tenant encryption keys.** Even a failure of (1) yields ciphertext the

@@ -490,6 +490,72 @@ so appointments already booked under the old pattern remain explicable.
 
 ---
 
+## Platform console
+
+The vendor-side surface, mounted at `/platform` **only when both
+`DATABASE_PLATFORM_URL` and `JWT_PLATFORM_SECRET` are configured**. An
+installation that has not deliberately turned on cross-tenant access gets a
+404 here rather than an authentication prompt in front of a privileged
+endpoint.
+
+| Method | Path | Who |
+|---|---|---|
+| `POST` | `/platform/auth/login` | — |
+| `POST` | `/platform/auth/refresh` | refresh cookie |
+| `POST` | `/platform/auth/accept-invite` | invitation token |
+| `POST` | `/platform/auth/logout` | operator |
+| `GET` | `/platform/me` | operator |
+| `GET` | `/platform/summary` | operator |
+| `GET` | `/platform/tenants` | operator |
+| `POST` | `/platform/tenants` | operator |
+| `GET` | `/platform/tenants/:id` | operator |
+| `PATCH` | `/platform/tenants/:id/status` | operator |
+| `PATCH` | `/platform/tenants/:id/plan` | operator |
+| `GET` | `/platform/operators` | operator |
+| `POST` | `/platform/operators` | **owner** |
+| `PATCH` | `/platform/operators/:id` | **owner** |
+| `GET` | `/platform/audit` | operator |
+| `GET` | `/platform/audit/chain` | operator |
+| `GET` | `/platform/break-glass` | operator |
+
+**A platform operator is not a user of any hospital.** They live in
+`platform_users`, authenticate against `platform_sessions`, and carry a token
+signed with a third secret and an `aud` of `hims:platform`. A hospital token
+presented here fails signature verification before a claim is read, and a
+console token presented to a tenant route does the same. `hims_app` is
+explicitly REVOKEd from the platform tables, so the role serving hospital
+traffic cannot read operator credentials at all.
+
+`POST /tenants` is **one transaction**: the tenant row, its wrapped data
+encryption key, its first facility, and its first `hospital_admin` in
+`invited` state with a single-use link. A tenant without a key cannot decrypt
+its own columns, one without a facility cannot register a patient, and one
+without an administrator can only be entered by a vendor operator — so any
+partial state would need a human to repair it by hand. The response carries
+the invitation URL rather than claiming an email was sent; there is no
+vendor-side mail template.
+
+`PATCH /tenants/:id/status` moves `tenants.status`, which the login path has
+always honoured with `TENANT_SUSPENDED`. It also **revokes every live session**
+for that tenant — otherwise suspension would stop new sign-ins while everyone
+already working carried on for up to a week on their refresh token. A reason
+is required for anything other than `active`, and is recorded on the tenant
+and in the audit trail. Archiving is terminal; the console will not reverse it.
+
+**Every platform action is written to `audit_events`** — the same hash-chained
+table the clinical path uses — with `platform_actor_id` set and the operator's
+email in `actor_label`. A hospital reading its own trail therefore sees what
+the vendor did to its account, and sees nothing of what the vendor did to
+anyone else's.
+
+**No platform endpoint returns patient data.** The break-glass queue returns
+counts, the clinician's name and whether a review has happened — not the
+patient, not the justification text. A support question that genuinely needs
+clinical data is answered by a named person inside that hospital, under that
+hospital's own break-glass review.
+
+---
+
 ## Health
 
 | Path | Returns |

@@ -230,11 +230,47 @@ async function verify(): Promise<void> {
       problems.push(`${row.relname}: tenant-scoped table with row-level security disabled`);
     }
 
-    const { rows: chainBreaks } = await client.query<{ broken_at_id: string }>(
-      'SELECT broken_at_id FROM hims_util.verify_audit_chain()',
-    );
-    for (const row of chainBreaks) {
-      problems.push(`audit_events: hash chain broken at row ${row.broken_at_id}`);
+    /*
+     * The audit chain, on a connection that can actually see it.
+     *
+     * This ran on the migration connection, and `audit_events` is FORCE'd
+     * under row-level security — so with no tenant context it walked ZERO
+     * rows and reported the chain unbroken every single time, including over
+     * a trail that was genuinely forked. The function now refuses to pass
+     * vacuously, which means it must be given a role that sees everything:
+     * `hims_platform`, via DATABASE_PLATFORM_URL.
+     *
+     * Where that is not configured the check is reported as SKIPPED. Saying
+     * "not checked" is the only honest option; saying "unbroken" is what this
+     * code used to do.
+     */
+    const checks = ['checksums match', 'row-level security intact'];
+
+    if (process.env.DATABASE_PLATFORM_URL) {
+      const auditClient = new Client({ connectionString: process.env.DATABASE_PLATFORM_URL });
+      await auditClient.connect();
+
+      try {
+        const { rows: chainBreaks } = await auditClient.query<{ broken_at_id: string }>(
+          'SELECT broken_at_id FROM hims_util.verify_audit_chain()',
+        );
+        for (const row of chainBreaks) {
+          problems.push(`audit_events: hash chain broken at row ${row.broken_at_id}`);
+        }
+        checks.push('audit chain unbroken');
+      } catch (error) {
+        problems.push(
+          `audit_events: the hash chain could not be verified (${(error as Error).message})`,
+        );
+      } finally {
+        await auditClient.end();
+      }
+    } else {
+      logger.warn(
+        'audit chain NOT CHECKED: set DATABASE_PLATFORM_URL to a hims_platform connection. ' +
+          'The migration role cannot see audit_events through row-level security.',
+      );
+      checks.push('audit chain NOT CHECKED');
     }
 
     if (problems.length > 0) {
@@ -243,10 +279,7 @@ async function verify(): Promise<void> {
       return;
     }
 
-    logger.info(
-      { migrations: applied.size },
-      'verified: checksums match, row-level security intact, audit chain unbroken',
-    );
+    logger.info({ migrations: applied.size }, `verified: ${checks.join(', ')}`);
   } finally {
     await client.end();
   }

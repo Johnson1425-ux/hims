@@ -156,6 +156,40 @@ docker compose -f infra/docker-compose.yml down     # keeps the volume
 docker compose -f infra/docker-compose.yml down -v  # and discards its data
 ```
 
+### The platform console
+
+The vendor-side surface — provisioning hospitals, suspending them, managing
+operators, reading the audit trail across tenants. It is **off by default** and
+mounted only when both of these are set:
+
+```bash
+DATABASE_PLATFORM_URL=postgresql://hims_platform:dev-only-password@localhost:5433/hims
+JWT_PLATFORM_SECRET=$(openssl rand -base64 48)   # must differ from the other two
+```
+
+Then create the first operator. They choose their own password from the printed
+link, so nobody — including whoever ran the command — ever knows it:
+
+```bash
+pnpm platform:bootstrap -- --email ops@example.com --name "Your Name"
+```
+
+The console is at `/platform`, and it looks nothing like the hospital app on
+purpose: a fixed dark chrome and a standing banner, because an operator who
+cannot tell at a glance which of the two they are in will eventually act in the
+wrong one.
+
+A platform operator is **not** a user of any hospital. Separate table, separate
+sessions, separate signing key — a staff account cannot sign in to the console
+and a console account cannot sign in to a hospital. Every action is written to
+the hospital's own audit trail, so a customer can see what the vendor did to
+their account.
+
+Setting `DATABASE_PLATFORM_URL` also lets `pnpm db:verify` check the audit hash
+chain. Without it the check reports **NOT CHECKED** rather than passing: the
+migration role cannot see `audit_events` through row-level security, so running
+the verifier there walks zero rows.
+
 ### Why four database roles
 
 `db:create` makes `hims_owner`, `hims_app`, `hims_platform` and
@@ -168,7 +202,7 @@ isolation tests would pass while the running system leaked.
 |---|---|---|
 | `hims_owner` | `pnpm db:migrate` | Owns the schema. Not a superuser — trusted extensions work because it owns the database. |
 | `hims_app` | The API at runtime | No `BYPASSRLS`. Row-level security applies to every query it makes. |
-| `hims_platform` | Break-glass support, cross-tenant jobs | `BYPASSRLS`, deliberately narrow, everything it does is audited. |
+| `hims_platform` | The platform console, cross-tenant jobs | `BYPASSRLS`, deliberately narrow, everything it does is audited. Set `DATABASE_PLATFORM_URL` to use it. |
 | `hims_analytics` | BI / warehouse export | Reporting views only. |
 
 The container's `POSTGRES_USER` stays `postgres` for exactly this reason. Making
