@@ -416,6 +416,50 @@ export interface TenantDepartment {
   code: string;
 }
 
+/**
+ * A facility as the SETTINGS screen sees it: every column of the form, and the
+ * closed ones too.
+ *
+ * Distinct from `TenantFacility`, which is the trimmed shape on `GET /tenant`
+ * that feeds the booking, registration and stock pickers. That one is
+ * active-only by design, so administration cannot reuse it — there would be no
+ * way to offer "reopen".
+ */
+export interface FacilityRecord {
+  id: string;
+  name: string;
+  code: string;
+  kind: string;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  region: string | null;
+  postal_code: string | null;
+  country: string;
+  phone: string | null;
+  /** NULL means "follow the hospital" rather than "unknown". */
+  timezone: string | null;
+  is_active: boolean;
+  created_at: string;
+  /** bigint, so pg hands it over as a string. */
+  active_department_count: string;
+}
+
+export interface DepartmentRecord {
+  id: string;
+  name: string;
+  code: string;
+  description: string | null;
+  /** NULL means the department spans the whole hospital. */
+  facility_id: string | null;
+  facility_name: string | null;
+  facility_is_active: boolean | null;
+  is_active: boolean;
+  created_at: string;
+  /** How many staff name this as their primary department. bigint -> string. */
+  staff_count: string;
+}
+
 export interface TenantProfile {
   id: string;
   slug: string;

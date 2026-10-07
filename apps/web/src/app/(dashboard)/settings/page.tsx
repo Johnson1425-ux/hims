@@ -12,8 +12,19 @@
  *
  * Settings and branding are merged server-side rather than replaced, so a form
  * that only knows about four fields cannot wipe a fifth it never loaded.
+ *
+ * The timezone is a DROPDOWN rather than a text field. It was free text, which
+ * looked harmless and was not: the value is the key by which stored instants
+ * become the times printed on a clinic list, so a typo saved cleanly and then
+ * broke the appointment board. The list comes from the browser's own zone
+ * database — see `TimezoneSelect`.
+ *
+ * Facilities and departments live in `<OrgStructure>`, which owns their
+ * loading and editing. They are not read from `useTenant()` here: that holds
+ * the active-only lists the pickers elsewhere depend on, and administration
+ * needs the closed rows in order to offer "reopen".
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PageHeader } from '@/components/layout/shell';
 import {
   Alert,
@@ -21,19 +32,15 @@ import {
   Button,
   Card,
   CardHeader,
-  EmptyState,
   Input,
   Skeleton,
-  Table,
-  Td,
-  Th,
-  Tr,
 } from '@/components/ui/primitives';
+import { TimezoneSelect } from '@/components/ui/timezone-select';
+import { OrgStructure } from '@/components/settings/org-structure';
 import { useSession } from '@/lib/session';
 import { useTenant } from '@/lib/tenant';
-import { ApiError, api } from '@/lib/api';
+import { ApiError, api, type TenantProfile } from '@/lib/api';
 import { formatMoney, humanise } from '@/lib/format';
-import { IconSettings } from '@/components/layout/icons';
 
 /** Currencies this deployment is set up for, with their scale made explicit. */
 const CURRENCIES = [
@@ -65,14 +72,40 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'good' | 'critical'; text: string } | null>(null);
 
-  // Re-seeded whenever the tenant reloads, so the form never shows a stale
-  // value next to a saved one.
+  /**
+   * Seed the form from the server, but only where the SERVER's answer has
+   * changed since it was last seen.
+   *
+   * Re-seeding unconditionally was fine when this screen only ever reloaded
+   * the tenant after its own save. It stopped being fine once adding a
+   * facility also reloaded it — the new site has to reach the pickers on the
+   * booking and stock screens, which read the same cache — because a half-typed
+   * display name would be thrown away by an action taken in a different card.
+   *
+   * Comparing against the previous SERVER value rather than against the input
+   * is what distinguishes the two cases: a reload that did not touch these
+   * four fields leaves the user's typing alone, while one that did (a
+   * colleague's change, or this screen's own save) still wins.
+   */
+  const lastSeen = useRef<TenantProfile | null>(null);
+
   useEffect(() => {
     if (!tenant) return;
-    setDisplayName(tenant.display_name);
-    setTimezone(tenant.timezone);
-    setLocale(tenant.locale);
-    setCurrency(tenant.currency);
+    const previous = lastSeen.current;
+    lastSeen.current = tenant;
+
+    if (!previous || previous.id !== tenant.id) {
+      setDisplayName(tenant.display_name);
+      setTimezone(tenant.timezone);
+      setLocale(tenant.locale);
+      setCurrency(tenant.currency);
+      return;
+    }
+
+    if (previous.display_name !== tenant.display_name) setDisplayName(tenant.display_name);
+    if (previous.timezone !== tenant.timezone) setTimezone(tenant.timezone);
+    if (previous.locale !== tenant.locale) setLocale(tenant.locale);
+    if (previous.currency !== tenant.currency) setCurrency(tenant.currency);
   }, [tenant]);
 
   const dirty =
@@ -183,13 +216,12 @@ export default function SettingsPage() {
               onChange={(event) => setDisplayName(event.target.value)}
             />
 
-            <Input
+            <TimezoneSelect
               name="timezone"
-              label="Timezone"
               value={timezone}
               disabled={!editable}
-              hint="Appointment times are stored absolutely and rendered in this zone"
-              onChange={(event) => setTimezone(event.target.value)}
+              hint="Appointment times are stored absolutely and rendered in this zone. A site in a different zone can override it."
+              onChange={setTimezone}
             />
 
             <div>
@@ -284,88 +316,17 @@ export default function SettingsPage() {
             ) : null}
           </div>
         </Card>
+      </div>
 
-        <Card padded={false}>
-          <div className="p-5 pb-0">
-            <CardHeader
-              title="Facilities"
-              subtitle="Sites this hospital operates; appointments and stock are held per facility"
-            />
-          </div>
-
-          {(tenant.facilities ?? []).length === 0 ? (
-            <EmptyState icon={<IconSettings />} title="No active facilities" />
-          ) : (
-            <div className="px-5 pb-1">
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>Name</Th>
-                    <Th>Code</Th>
-                    <Th>Kind</Th>
-                    <Th align="right">Timezone</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(tenant.facilities ?? []).map((facility) => (
-                    <Tr key={facility.id}>
-                      <Td className="font-medium" style={{ color: 'var(--ink)' }}>
-                        {facility.name}
-                      </Td>
-                      <Td className="tabular" style={{ color: 'var(--ink-muted)' }}>
-                        {facility.code}
-                      </Td>
-                      <Td>
-                        <Badge tone="neutral" dot>
-                          {humanise(facility.kind)}
-                        </Badge>
-                      </Td>
-                      <Td align="right" style={{ color: 'var(--ink-muted)' }}>
-                        {facility.timezone}
-                      </Td>
-                    </Tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          )}
-        </Card>
-
-        <Card padded={false}>
-          <div className="p-5 pb-0">
-            <CardHeader
-              title="Departments"
-              subtitle="Used for routing, rotas and the utilisation report"
-            />
-          </div>
-
-          {(tenant.departments ?? []).length === 0 ? (
-            <EmptyState icon={<IconSettings />} title="No active departments" />
-          ) : (
-            <div className="px-5 pb-1">
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>Name</Th>
-                    <Th align="right">Code</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(tenant.departments ?? []).map((department) => (
-                    <Tr key={department.id}>
-                      <Td className="font-medium" style={{ color: 'var(--ink)' }}>
-                        {department.name}
-                      </Td>
-                      <Td align="right" className="tabular" style={{ color: 'var(--ink-muted)' }}>
-                        {department.code}
-                      </Td>
-                    </Tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          )}
-        </Card>
+      <div className="mt-5">
+        <OrgStructure
+          editable={editable}
+          tenantTimezone={tenant.timezone}
+          // The app-wide tenant cache holds the active-only facility and
+          // department lists that the booking, registration and stock
+          // pickers read, so a change here has to invalidate it.
+          onChanged={reload}
+        />
       </div>
 
       <div className="mt-5">

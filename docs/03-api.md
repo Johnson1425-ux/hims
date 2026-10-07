@@ -444,6 +444,38 @@ this record, when, and on what basis. Running it is itself an audited PHI read.
 | `POST` | `/staff/:id/time-off` | `schedule:manage` |
 | `GET` | `/tenant` | authenticated |
 | `PATCH` | `/tenant` | `tenant:settings` |
+| `GET` | `/tenant/facilities` | authenticated |
+| `POST` | `/tenant/facilities` | `tenant:settings` |
+| `PATCH` | `/tenant/facilities/:id` | `tenant:settings` |
+| `GET` | `/tenant/departments` | authenticated |
+| `POST` | `/tenant/departments` | `tenant:settings` |
+| `PATCH` | `/tenant/departments/:id` | `tenant:settings` |
+
+**There is no DELETE for a facility or a department.** A facility is the
+foreign-key target of eleven tables — appointments, encounters, invoices and
+stock locations among them — and a department of five more. Removing one would
+either cascade clinical history away or null out the site a consultation
+happened in. The lifecycle is `is_active`: `PATCH … {"isActive": false}` closes
+it, `true` reopens it, and the history keeps resolving either way. The last
+open facility cannot be closed, because registration, booking and stock each
+need one to point at.
+
+`GET /tenant/facilities` and `GET /tenant/departments` take
+`?includeInactive=true` and return every column, for the settings screen. They
+are deliberately separate from the `facilities` and `departments` arrays on
+`GET /tenant`, which are active-only and feed the pickers on the booking,
+registration and stock screens.
+
+`timezone`, on both the tenant and a facility, is validated as a named IANA
+zone and stored canonicalised — `us/eastern` is saved as `America/New_York`. A
+fixed offset such as `+03:00` is refused: it looks like a timezone but never
+observes a daylight-saving transition, so an appointment booked across one
+lands an hour out. A facility's `timezone` may be `null`, meaning it follows
+the hospital's.
+
+`code` is upper-cased before the uniqueness check on both, so `main` and `MAIN`
+cannot both exist. A collision with a closed row says so, and says to reactivate
+it rather than invent a second code for the same place.
 
 `POST /staff` sets **no password**: the account is created `invited` with a
 single-use token and the invitee chooses their own credential. An administrator
