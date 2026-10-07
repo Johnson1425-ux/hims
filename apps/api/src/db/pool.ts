@@ -181,22 +181,27 @@ function platformPool(): Pool {
     );
   }
 
-  privilegedPool ??= new Pool({
-    connectionString: env.DATABASE_PLATFORM_URL,
-    max: Math.min(5, env.DATABASE_POOL_MAX),
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
-    ssl: env.DATABASE_SSL ? { rejectUnauthorized: true } : undefined,
-    statement_timeout: env.DATABASE_STATEMENT_TIMEOUT_MS,
-    query_timeout: env.DATABASE_STATEMENT_TIMEOUT_MS,
-    // Distinct in pg_stat_activity, so a cross-tenant query is identifiable
-    // in the logs of a database that should mostly not be serving them.
-    application_name: 'hims-platform',
-  });
+  // The listener is attached inside the branch, not after it: registering it
+  // on every call leaks one handler per request and trips Node's
+  // MaxListenersExceeded warning once a console session gets busy.
+  if (!privilegedPool) {
+    privilegedPool = new Pool({
+      connectionString: env.DATABASE_PLATFORM_URL,
+      max: Math.min(5, env.DATABASE_POOL_MAX),
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+      ssl: env.DATABASE_SSL ? { rejectUnauthorized: true } : undefined,
+      statement_timeout: env.DATABASE_STATEMENT_TIMEOUT_MS,
+      query_timeout: env.DATABASE_STATEMENT_TIMEOUT_MS,
+      // Distinct in pg_stat_activity, so a cross-tenant query is identifiable
+      // in the logs of a database that should mostly not be serving them.
+      application_name: 'hims-platform',
+    });
 
-  privilegedPool.on('error', (err) => {
-    logger.error({ err }, 'idle platform database client errored');
-  });
+    privilegedPool.on('error', (err) => {
+      logger.error({ err }, 'idle platform database client errored');
+    });
+  }
 
   return privilegedPool;
 }

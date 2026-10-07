@@ -110,3 +110,61 @@ export const breakGlassQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
+
+/* ---------------------------------------------------------------------------
+ * Subscription billing
+ * ------------------------------------------------------------------------- */
+
+const isoDate = () => z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD.');
+
+/** Money on the wire is always an integer of the smallest unit. */
+const money = () => z.coerce.number().int().min(0).max(1_000_000_000_000);
+
+export const updatePlanSchema = z.object({
+  amountCents: money(),
+  paymentTermsDays: z.coerce.number().int().min(0).max(365).optional(),
+  description: z.string().trim().max(500).nullish(),
+  isActive: z.boolean().optional(),
+});
+
+export const setSubscriptionSchema = z.object({
+  currency: z
+    .string()
+    .trim()
+    .transform((v) => v.toUpperCase())
+    .pipe(z.string().regex(/^[A-Z]{3}$/, 'A three-letter ISO currency code.'))
+    .optional(),
+  billingInterval: z.enum(['month', 'year']).optional(),
+  /**
+   * `null` is meaningful and distinct from omitting the field: it CLEARS a
+   * negotiated rate and returns the hospital to the published price.
+   */
+  amountCents: money().nullable().optional(),
+  paymentTermsDays: z.coerce.number().int().min(0).max(365).nullable().optional(),
+  trialEndsOn: isoDate().nullable().optional(),
+  status: z.enum(['trialing', 'active', 'cancelled']).optional(),
+  notes: z.string().trim().max(1000).nullish(),
+});
+
+export const listInvoicesSchema = z.object({
+  tenantId: z.string().uuid().optional(),
+  status: z.enum(['issued', 'partially_paid', 'paid', 'void']).optional(),
+  overdueOnly: booleanish().default(false),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+export const recordPaymentSchema = z.object({
+  amountCents: z.coerce.number().int().positive().max(1_000_000_000_000),
+  receivedOn: isoDate().optional(),
+  method: z
+    .enum(['bank_transfer', 'mobile_money', 'card', 'cash', 'cheque', 'other'])
+    .default('bank_transfer'),
+  /** The transfer reference or mobile-money code reconciliation is done on. */
+  reference: z.string().trim().max(120).nullish(),
+  notes: z.string().trim().max(500).nullish(),
+});
+
+export const voidSchema = z.object({
+  reason: z.string().trim().min(3, 'Say why.').max(500),
+});

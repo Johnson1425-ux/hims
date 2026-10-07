@@ -26,6 +26,7 @@ import {
 import * as service from './service.js';
 import * as tenants from './tenants.js';
 import * as audit from './audit.js';
+import * as billing from './billing.js';
 import {
   acceptInviteSchema,
   auditQuerySchema,
@@ -37,12 +38,20 @@ import {
   provisionTenantSchema,
   tenantStatusSchema,
   tenantTierSchema,
+  updatePlanSchema,
+  setSubscriptionSchema,
+  listInvoicesSchema,
+  recordPaymentSchema,
+  voidSchema,
 } from './schemas.js';
 
 export const platformRoutes = Router();
 
 const tenantParams = z.object({ tenantId: z.string().uuid() });
 const operatorParams = z.object({ operatorId: z.string().uuid() });
+const planParams = z.object({ planId: z.string().uuid() });
+const invoiceParams = z.object({ invoiceId: z.string().uuid() });
+const paymentParams = z.object({ paymentId: z.string().uuid() });
 
 function meta(req: Request): service.RequestMeta {
   return {
@@ -270,6 +279,187 @@ platformRoutes.patch(
       const data = await service.setOperatorStatus(
         param(req, 'operatorId'),
         input.status,
+        req.platformPrincipal!,
+        meta(req),
+      );
+      res.json({ data });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+
+/* ---- Subscription billing ------------------------------------------------ */
+/*
+ * The vendor's own books: what each hospital owes for the software. Entirely
+ * separate from /billing, which is what a patient owes a hospital.
+ *
+ * Reading is open to any operator; so is issuing and recording payment, since
+ * that is the support work the console exists for. Nothing here is owner-only
+ * — an owner's extra authority is over who holds console access, not over
+ * money.
+ */
+
+platformRoutes.get('/billing/summary', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ data: await billing.revenueSummary() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+platformRoutes.get('/billing/plans', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ data: await billing.listPlans() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+platformRoutes.patch(
+  '/billing/plans/:planId',
+  validate({ params: planParams, body: updatePlanSchema }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await billing.updatePlan(
+        param(req, 'planId'),
+        body(req, updatePlanSchema),
+        req.platformPrincipal!,
+        meta(req),
+      );
+      res.json({ data });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/** What the next run WOULD issue. Looked at before pressing the button. */
+platformRoutes.get('/billing/due', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ data: await billing.previewDue() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+platformRoutes.post('/billing/run', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await billing.issueDueInvoices(req.platformPrincipal!, meta(req));
+    res.json({ data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+platformRoutes.get(
+  '/billing/invoices',
+  validate({ query: listInvoicesSchema }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = queryParams(req, listInvoicesSchema);
+      const { rows, total } = await billing.listInvoices(input);
+      res.json({ data: rows, meta: { total, page: input.page, pageSize: input.pageSize } });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+platformRoutes.get(
+  '/billing/invoices/:invoiceId',
+  validate({ params: invoiceParams }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const invoice = await billing.getInvoice(param(req, 'invoiceId'));
+      if (!invoice) {
+        res.status(404).json({
+          error: { code: 'NOT_FOUND', message: 'That invoice could not be found.', requestId: req.requestId },
+        });
+        return;
+      }
+      res.json({ data: invoice });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+platformRoutes.post(
+  '/billing/invoices/:invoiceId/payments',
+  validate({ params: invoiceParams, body: recordPaymentSchema }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await billing.recordPayment(
+        param(req, 'invoiceId'),
+        body(req, recordPaymentSchema),
+        req.platformPrincipal!,
+        meta(req),
+      );
+      res.status(201).json({ data });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+platformRoutes.post(
+  '/billing/invoices/:invoiceId/void',
+  validate({ params: invoiceParams, body: voidSchema }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await billing.voidInvoice(
+        param(req, 'invoiceId'),
+        body(req, voidSchema).reason,
+        req.platformPrincipal!,
+        meta(req),
+      );
+      res.json({ data });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+platformRoutes.post(
+  '/billing/payments/:paymentId/void',
+  validate({ params: paymentParams, body: voidSchema }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await billing.voidPayment(
+        param(req, 'paymentId'),
+        body(req, voidSchema).reason,
+        req.platformPrincipal!,
+        meta(req),
+      );
+      res.json({ data });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+platformRoutes.get(
+  '/tenants/:tenantId/subscription',
+  validate({ params: tenantParams }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json({ data: await billing.getSubscription(param(req, 'tenantId')) });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+platformRoutes.put(
+  '/tenants/:tenantId/subscription',
+  validate({ params: tenantParams, body: setSubscriptionSchema }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await billing.setSubscription(
+        param(req, 'tenantId'),
+        body(req, setSubscriptionSchema),
         req.platformPrincipal!,
         meta(req),
       );
