@@ -433,3 +433,21 @@ textarea {
     color: #000;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Platform console
+ *
+ * The vendor console pins its own dark palette rather than following the
+ * light/dark preference the rest of the product honours. That is deliberate:
+ * this surface crosses hospital boundaries, and it must never be mistakable
+ * at a glance for a hospital's own screens. See `ConsoleShell`.
+ * ------------------------------------------------------------------------- */
+.console-root {
+  background: #0d1117;
+  color: #e2e8f0;
+  color-scheme: dark;
+}
+
+.console-root a {
+  color: inherit;
+}

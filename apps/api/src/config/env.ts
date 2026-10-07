@@ -47,6 +47,14 @@ const schema = z.object({
   DATABASE_POOL_MAX: z.coerce.number().int().positive().max(200).default(20),
   DATABASE_SSL: booleanish().default(false),
   DATABASE_STATEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  /**
+   * The BYPASSRLS connection (`hims_platform`), used by the vendor console
+   * and by nothing else. Optional: leave it unset and the console is not
+   * mounted at all. That is the safe default — a deployment that has not
+   * deliberately turned on cross-tenant access should not be running an
+   * endpoint capable of it.
+   */
+  DATABASE_PLATFORM_URL: z.string().min(1).optional(),
 
   MASTER_KEY: base64Key32,
   MASTER_KEY_VERSION: z.coerce.number().int().positive().default(1),
@@ -60,6 +68,17 @@ const schema = z.object({
     .string()
     .min(32, 'needs at least 32 characters')
     .refine((v) => !PLACEHOLDERS.includes(v), 'still set to the .env.example placeholder'),
+  /**
+   * A THIRD secret, for the platform console. Not a flourish: with a separate
+   * key, a tenant access token cannot be verified as a platform token even if
+   * an audience check were one day forgotten. Optional for the same reason as
+   * DATABASE_PLATFORM_URL — no secret, no console.
+   */
+  JWT_PLATFORM_SECRET: z
+    .string()
+    .min(32, 'needs at least 32 characters')
+    .refine((v) => !PLACEHOLDERS.includes(v), 'still set to the .env.example placeholder')
+    .optional(),
   JWT_ISSUER: z.string().default('hims.local'),
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('7d'),
@@ -134,6 +153,36 @@ if (env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET) {
   configErrors.push(
     'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ, otherwise a leaked ' +
       'access token can be replayed as a refresh token.',
+  );
+}
+
+/**
+ * The console is all-or-nothing. Half-configured would mean either an
+ * authenticated endpoint with no privileged connection behind it, or a
+ * privileged connection reachable with the tenant signing key.
+ */
+const platformParts = [
+  env.DATABASE_PLATFORM_URL ? null : 'DATABASE_PLATFORM_URL',
+  env.JWT_PLATFORM_SECRET ? null : 'JWT_PLATFORM_SECRET',
+].filter((name): name is string => name !== null);
+
+export const platformConsoleEnabled = platformParts.length === 0;
+
+if (!platformConsoleEnabled && platformParts.length === 1) {
+  configErrors.push(
+    `The platform console is half-configured: ${platformParts[0]} is missing. ` +
+      'Set both DATABASE_PLATFORM_URL and JWT_PLATFORM_SECRET to enable it, or neither to leave it off.',
+  );
+}
+
+if (
+  env.JWT_PLATFORM_SECRET &&
+  (env.JWT_PLATFORM_SECRET === env.JWT_ACCESS_SECRET ||
+    env.JWT_PLATFORM_SECRET === env.JWT_REFRESH_SECRET)
+) {
+  configErrors.push(
+    'JWT_PLATFORM_SECRET must differ from the tenant secrets. Sharing one would let a ' +
+      'hospital access token be presented to the vendor console.',
   );
 }
 

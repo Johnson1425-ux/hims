@@ -17,6 +17,7 @@
     "db:status": "tsx src/db/migrate.ts status",
     "db:verify": "tsx src/db/migrate.ts verify",
     "db:seed": "tsx src/db/seed.ts",
+    "platform:bootstrap": "tsx src/db/platform-bootstrap.ts",
     "worker:notifications": "tsx src/jobs/notification-worker.ts",
     "worker:scheduler": "tsx src/jobs/scheduler.ts"
   },

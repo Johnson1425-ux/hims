@@ -16,6 +16,7 @@
     "db:create": "pnpm --filter @hims/api db:create",
     "db:migrate": "pnpm --filter @hims/api db:migrate",
     "db:verify": "pnpm --filter @hims/api db:verify",
-    "db:seed": "pnpm --filter @hims/api db:seed"
+    "db:seed": "pnpm --filter @hims/api db:seed",
+    "platform:bootstrap": "pnpm --filter @hims/api platform:bootstrap"
   }
 }

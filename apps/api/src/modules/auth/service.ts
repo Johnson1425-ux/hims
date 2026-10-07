@@ -643,24 +643,50 @@ export async function requestPasswordReset(
   logger.info({ userId: identity.user_id }, 'password reset queued');
 }
 
+/**
+ * Set a password from a single-use emailed token.
+ *
+ * Accepts BOTH purposes, which is the point: `password_reset` for someone who
+ * has forgotten theirs, and `invitation` for someone who has never had one.
+ * The two differ only in how the token was issued — the work afterwards is
+ * identical, and the UPDATE below already flips an `invited` account to
+ * `active`, which is what the invitation case needs.
+ *
+ * It used to filter on `purpose = 'password_reset'` alone. `POST /staff` and
+ * tenant provisioning both issue `invitation` tokens, so every invitation
+ * ever sent was unredeemable: the link resolved to "invalid or has expired"
+ * on the first click, and an invited colleague could not get in by any
+ * route. The `invited -> active` transition sitting here unreachable is what
+ * gives the original intent away.
+ */
 export async function completePasswordReset(token: string, newPassword: string): Promise<void> {
   const tokenHash = sha256(token);
 
-  const { rows } = await query<{ user_id: string; tenant_id: string | null; token_id: string }>(
-    `SELECT t.user_id, u.tenant_id, t.id AS token_id
-       FROM auth_tokens t
-       JOIN users u ON u.id = t.user_id
-      WHERE t.token_hash = $1
-        AND t.purpose = 'password_reset'
-        AND t.consumed_at IS NULL
-        AND t.expires_at > now()`,
-    [tokenHash],
-  );
+  // Through the SECURITY DEFINER lookup, not a plain SELECT. The tenant is
+  // not known until the row is found — the token is all the caller has — and
+  // the policy on `auth_tokens` is keyed on the tenant context, so a direct
+  // read returns nothing however valid the link is. This is the third and
+  // last sanctioned read outside tenant isolation, alongside the two in 0013,
+  // and like them it is keyed on a SHA-256 of a random token.
+  const { rows } = await query<{
+    user_id: string;
+    tenant_id: string | null;
+    token_id: string;
+    purpose: string;
+  }>('SELECT token_id, user_id, tenant_id, purpose FROM hims_util.find_redeemable_token($1)', [
+    tokenHash,
+  ]);
 
   const match = rows[0];
   if (!match?.tenant_id) {
-    throw new AppError(400, 'PRECONDITION_FAILED', 'That reset link is invalid or has expired. Request a new one.');
+    throw new AppError(
+      400,
+      'PRECONDITION_FAILED',
+      'That link is invalid or has expired. Ask for a new one.',
+    );
   }
+
+  const isInvitation = match.purpose === 'invitation';
 
   await withTenant(
     match.tenant_id,
@@ -683,7 +709,7 @@ export async function completePasswordReset(token: string, newPassword: string):
       );
 
       if (rowCount === 0) {
-        throw new AppError(400, 'PRECONDITION_FAILED', 'That reset link has already been used.');
+        throw new AppError(400, 'PRECONDITION_FAILED', 'That link has already been used.');
       }
 
       await db.query(
@@ -698,21 +724,26 @@ export async function completePasswordReset(token: string, newPassword: string):
         [match.user_id, await hashPassword(newPassword)],
       );
 
+      // An invitation has no sessions to end; a reset might be the response
+      // to an account already being used by someone else.
       await db.query(
         `UPDATE auth_sessions
-            SET revoked_at = now(), revoked_reason = 'password_reset'
+            SET revoked_at = now(), revoked_reason = $2
           WHERE user_id = $1 AND revoked_at IS NULL`,
-        [match.user_id],
+        [match.user_id, isInvitation ? 'invitation_accepted' : 'password_reset'],
       );
 
       await db.query(
         `INSERT INTO audit_events (tenant_id, actor_user_id, action, resource_type, resource_id, outcome)
-         VALUES ($1, $2, 'auth.password_reset', 'user', $2, 'success')`,
-        [match.tenant_id, match.user_id],
+         VALUES ($1, $2, $3, 'user', $2, 'success')`,
+        [match.tenant_id, match.user_id, isInvitation ? 'auth.invitation_accepted' : 'auth.password_reset'],
       );
     },
     { actorUserId: match.user_id },
   );
 
-  logger.info({ userId: match.user_id }, 'password reset completed');
+  logger.info(
+    { userId: match.user_id, purpose: match.purpose },
+    isInvitation ? 'invitation accepted' : 'password reset completed',
+  );
 }

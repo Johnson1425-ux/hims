@@ -17,6 +17,9 @@ import { staffRoutes } from './staff/routes.js';
 import { notificationRoutes } from './notifications/routes.js';
 import { reportRoutes } from './reports/routes.js';
 import { tenantRoutes } from './tenants/routes.js';
+import { platformRoutes } from './platform/routes.js';
+import { platformConsoleEnabled } from '../config/env.js';
+import { logger } from '../utils/logger.js';
 
 export const apiRouter = Router();
 
@@ -31,3 +34,19 @@ apiRouter.use('/staff', staffRoutes);
 apiRouter.use('/notifications', notificationRoutes);
 apiRouter.use('/reports', reportRoutes);
 apiRouter.use('/tenant', tenantRoutes);
+
+/*
+ * The vendor console, mounted only where the deployment asked for it.
+ *
+ * This is the one router whose routes can reach across tenant boundaries, so
+ * it is not mounted at all unless BOTH DATABASE_PLATFORM_URL (a BYPASSRLS
+ * connection) and JWT_PLATFORM_SECRET are configured. An installation that
+ * has not deliberately turned cross-tenant access on gets a 404 here rather
+ * than an authentication prompt in front of a privileged surface.
+ */
+if (platformConsoleEnabled) {
+  apiRouter.use('/platform', platformRoutes);
+  logger.warn('the platform console is ENABLED at /api/v1/platform');
+} else {
+  logger.info('the platform console is disabled (DATABASE_PLATFORM_URL / JWT_PLATFORM_SECRET unset)');
+}
