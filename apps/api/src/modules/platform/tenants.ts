@@ -21,6 +21,7 @@ import { generateTenantDataKey, randomToken, sha256 } from '../../security/crypt
 import { env } from '../../config/env.js';
 import type { PlatformPrincipal } from '../../middleware/authenticate-platform.js';
 import { recordPlatformAction, type RequestMeta } from './service.js';
+import { billingRecipients } from './billing.js';
 import type { z } from 'zod';
 import type { provisionTenantSchema } from './schemas.js';
 
@@ -121,7 +122,31 @@ export async function getTenant(tenantId: string): Promise<Record<string, unknow
       [tenantId],
     );
 
-    return rows[0] ?? null;
+    const tenant = rows[0];
+    if (!tenant) return null;
+
+    /*
+     * Who to write to.
+     *
+     * An operator looking at an overdue invoice had no way to reach anybody:
+     * the console showed volumes and a slug, and the only email on the page
+     * was the vendor operator who provisioned the hospital. Chasing payment
+     * meant going to the database.
+     *
+     * THESE ARE EXACTLY THE PEOPLE THE SYSTEM ALREADY EMAILS — the holders
+     * of `tenant:settings`, the same set `billingRecipients` addresses for
+     * every invoice and receipt. That is the line this stays on: it is a
+     * billing contact list, not a staff directory, and nothing here reaches
+     * a clinician, let alone a patient.
+     *
+     * It also makes the silent failure visible. A hospital with no active
+     * administrator gets invoiced and notified to nobody, which until now
+     * was a line in a log file; on the page it is an empty card with a
+     * warning on it.
+     */
+    const contacts = await billingRecipients(db, tenantId);
+
+    return { ...tenant, billing_contacts: contacts };
   });
 }
 

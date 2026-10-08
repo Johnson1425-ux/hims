@@ -580,6 +580,96 @@ function formatDay(value: string | Date): string {
  * last administrator was deactivated would be the wrong way round. It
  * surfaces in the run result instead.
  */
+/**
+ * Who at a hospital hears from the vendor about money.
+ *
+ * ADDRESSED BY PERMISSION, not by role — see the note on
+ * `notifyInvoiceIssued`. Shared by every billing notification so an invoice
+ * and the receipt for paying it can never reach different people, which is
+ * the bug where a hospital gets chased for an invoice whose payment
+ * confirmation went to somebody who has since left.
+ */
+export async function billingRecipients(
+  db: Queryable,
+  tenantId: string,
+): Promise<Array<{ id: string; full_name: string; email: string }>> {
+  const { rows } = await db.query<{ id: string; full_name: string; email: string }>(
+    `SELECT DISTINCT u.id, u.full_name, u.email
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.id
+       JOIN role_permissions rp ON rp.role_id = ur.role_id
+      WHERE u.tenant_id = $1
+        AND u.status = 'active'
+        AND rp.permission_key = 'tenant:settings'
+        AND (ur.expires_at IS NULL OR ur.expires_at > now())
+      ORDER BY u.full_name`,
+    [tenantId],
+  );
+
+  return rows;
+}
+
+/**
+ * Queue one billing message on both channels, for every recipient.
+ *
+ * ALWAYS CALLED INSIDE THE CALLER'S TRANSACTION. A payment recorded with
+ * nothing queued is one the hospital never hears about; a confirmation for a
+ * payment that rolled back is worse. Both or neither.
+ *
+ * Never throws. A hospital whose last administrator was deactivated still
+ * owes the money and the operator still needs the payment recorded —
+ * refusing the write because there is nobody to email would be the wrong way
+ * round. It is logged loudly instead, and the console now shows the contact
+ * list so the gap is visible before it matters.
+ */
+async function queueBillingNotice(
+  db: Queryable,
+  args: {
+    tenantId: string;
+    templateKey: string;
+    payload: Record<string, string>;
+    /** Makes a retried transaction idempotent. Unique per event, per person. */
+    dedupeSubject: string;
+    context: Record<string, unknown>;
+  },
+): Promise<number> {
+  const recipients = await billingRecipients(db, args.tenantId);
+
+  if (recipients.length === 0) {
+    logger.warn(
+      { tenantId: args.tenantId, templateKey: args.templateKey, ...args.context },
+      'no active administrator holds tenant:settings; nobody was notified',
+    );
+    return 0;
+  }
+
+  const payload = JSON.stringify(args.payload);
+
+  for (const recipient of recipients) {
+    for (const channel of ['in_app', 'email'] as const) {
+      await db.query(
+        `INSERT INTO notifications
+           (tenant_id, user_id, channel, template_key, category, priority, payload, dedupe_key)
+         VALUES ($1, $2, $3, $4, 'billing', 4, $5, $6)
+         -- Must name the partial index exactly: uq_notifications_dedupe is
+         -- on (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL, and a
+         -- conflict target that does not match it infers nothing and throws.
+         ON CONFLICT (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
+        [
+          args.tenantId,
+          recipient.id,
+          channel,
+          args.templateKey,
+          payload,
+          `${args.dedupeSubject}:${recipient.id}:${channel}`,
+        ],
+      );
+    }
+  }
+
+  return recipients.length;
+}
+
 async function notifyInvoiceIssued(
   db: Queryable,
   invoice: {
@@ -595,17 +685,7 @@ async function notifyInvoiceIssued(
     tenant_name: string;
   },
 ): Promise<number> {
-  const { rows: admins } = await db.query<{ id: string }>(
-    `SELECT DISTINCT u.id
-       FROM users u
-       JOIN user_roles ur ON ur.user_id = u.id
-       JOIN role_permissions rp ON rp.role_id = ur.role_id
-      WHERE u.tenant_id = $1
-        AND u.status = 'active'
-        AND rp.permission_key = 'tenant:settings'
-        AND (ur.expires_at IS NULL OR ur.expires_at > now())`,
-    [invoice.tenant_id],
-  );
+  const admins = await billingRecipients(db, invoice.tenant_id);
 
   if (admins.length === 0) {
     logger.warn(
@@ -617,7 +697,7 @@ async function notifyInvoiceIssued(
 
   // The link carries its own authority so it opens from a mail client with
   // no session. See security/download-tokens.ts.
-  const payload = JSON.stringify({
+  const payload = {
     invoiceNumber: invoice.invoice_number,
     hospitalName: invoice.tenant_name,
     tier: invoice.tier,
@@ -626,33 +706,18 @@ async function notifyInvoiceIssued(
     periodStart: formatDay(invoice.period_start),
     periodEnd: formatDay(invoice.period_end),
     invoiceUrl: invoiceDownloadUrl(invoice.id, invoice.tenant_id),
+  };
+
+  // Re-running the generator must not re-notify. The unique index on the
+  // invoice period already prevents a duplicate invoice; the dedupe key
+  // guards the case of a retried transaction.
+  return queueBillingNotice(db, {
+    tenantId: invoice.tenant_id,
+    templateKey: 'subscription_invoice_issued',
+    payload,
+    dedupeSubject: `sub-invoice:${invoice.id}`,
+    context: { invoiceNumber: invoice.invoice_number },
   });
-
-  for (const admin of admins) {
-    for (const channel of ['in_app', 'email'] as const) {
-      await db.query(
-        `INSERT INTO notifications
-           (tenant_id, user_id, channel, template_key, category, priority, payload, dedupe_key)
-         VALUES ($1, $2, $3, 'subscription_invoice_issued', 'billing', 4, $4, $5)
-         -- Must name the partial index exactly: uq_notifications_dedupe is
-         -- on (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL, and a
-         -- conflict target that does not match it infers nothing and throws.
-         ON CONFLICT (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
-        [
-          invoice.tenant_id,
-          admin.id,
-          channel,
-          payload,
-          // Re-running the generator must not re-notify. The unique index on
-          // the invoice period already prevents a duplicate invoice; this
-          // guards the case of a retried transaction.
-          `sub-invoice:${invoice.id}:${admin.id}:${channel}`,
-        ],
-      );
-    }
-  }
-
-  return admins.length;
 }
 
 /* ---------------------------------------------------------------------------
@@ -808,6 +873,19 @@ export async function downloadLink(
  * Payments
  * ------------------------------------------------------------------------- */
 
+/**
+ * `bank_transfer` is a column value; "bank transfer" is what belongs in a
+ * sentence sent to a customer.
+ */
+const METHOD_LABELS: Record<string, string> = {
+  bank_transfer: 'bank transfer',
+  mobile_money: 'mobile money',
+  card: 'card',
+  cheque: 'cheque',
+  cash: 'cash',
+  other: 'another method',
+};
+
 export interface PaymentInput {
   amountCents: number;
   receivedOn?: string;
@@ -831,9 +909,18 @@ export async function recordPayment(
       total_cents: string;
       amount_paid_cents: string;
       invoice_number: string;
+      due_on: string;
+      tenant_name: string;
     }>(
-      `SELECT id, tenant_id, currency, status, total_cents, amount_paid_cents, invoice_number
-         FROM subscription_invoices WHERE id = $1 FOR UPDATE`,
+      // FOR UPDATE OF i so the lock lands on the invoice and not on the
+      // joined tenants row, which this transaction only reads.
+      `SELECT i.id, i.tenant_id, i.currency, i.status, i.total_cents,
+              i.amount_paid_cents, i.invoice_number, i.due_on,
+              t.display_name AS tenant_name
+         FROM subscription_invoices i
+         JOIN tenants t ON t.id = i.tenant_id
+        WHERE i.id = $1
+          FOR UPDATE OF i`,
       [invoiceId],
     );
 
@@ -902,6 +989,52 @@ export async function recordPayment(
       meta,
     );
 
+    /*
+     * Tell the hospital. The invoice email promises "a payment can take a day
+     * or two to be recorded against your account", and until this existed
+     * that promise went nowhere: they paid into an account they cannot see
+     * the other side of and heard nothing.
+     *
+     * SETTLED IS A DIFFERENT MESSAGE, not the same one with a zero in it.
+     * Template interpolation here is {{key}}-only with no conditionals, so a
+     * receipt that says "{{balance}} remains outstanding" cannot fall silent
+     * when the balance is nil — it would tell a hospital that has just
+     * cleared its account that it still owes "".
+     */
+    const paymentId = rows[0]!.id as string;
+    const remaining = balance - input.amountCents;
+    const settled = remaining === 0;
+
+    const notified = await queueBillingNotice(db, {
+      tenantId: invoice.tenant_id,
+      templateKey: settled ? 'subscription_invoice_settled' : 'subscription_payment_received',
+      payload: {
+        invoiceNumber: invoice.invoice_number,
+        hospitalName: invoice.tenant_name,
+        amount: formatAmount(input.amountCents, invoice.currency),
+        method: METHOD_LABELS[input.method] ?? input.method.replace(/_/g, ' '),
+        // Never blank: an empty "Your reference:" line reads as a system that
+        // lost it, when the truth is the operator had none to record.
+        reference: input.reference?.trim() || 'none recorded',
+        receivedOn: formatDay(input.receivedOn ?? new Date()),
+        balance: formatAmount(remaining, invoice.currency),
+        dueDate: formatDay(invoice.due_on),
+        invoiceUrl: invoiceDownloadUrl(invoiceId, invoice.tenant_id),
+      },
+      dedupeSubject: `sub-payment:${paymentId}`,
+      context: { invoiceNumber: invoice.invoice_number, paymentId },
+    });
+
+    logger.info(
+      {
+        invoiceNumber: invoice.invoice_number,
+        paymentId,
+        settled,
+        notified,
+      },
+      'subscription payment recorded',
+    );
+
     return (await loadInvoice(db, invoiceId))!;
   });
 }
@@ -919,8 +1052,21 @@ export async function voidPayment(
       tenant_id: string;
       amount_cents: string;
       voided_at: Date | null;
+      currency: string;
+      invoice_number: string;
+      due_on: string;
+      total_cents: string;
+      amount_paid_cents: string;
+      tenant_name: string;
     }>(
-      'SELECT id, invoice_id, tenant_id, amount_cents, voided_at FROM subscription_payments WHERE id = $1 FOR UPDATE',
+      `SELECT p.id, p.invoice_id, p.tenant_id, p.amount_cents, p.voided_at,
+              i.currency, i.invoice_number, i.due_on, i.total_cents,
+              i.amount_paid_cents, t.display_name AS tenant_name
+         FROM subscription_payments p
+         JOIN subscription_invoices i ON i.id = p.invoice_id
+         JOIN tenants t ON t.id = p.tenant_id
+        WHERE p.id = $1
+          FOR UPDATE OF p, i`,
       [paymentId],
     );
 
@@ -946,6 +1092,48 @@ export async function voidPayment(
         metadata: { reason, amountCents: Number(payment.amount_cents) },
       },
       meta,
+    );
+
+    /*
+     * Tell them it came back off.
+     *
+     * Voiding is how an operator corrects a mis-keyed amount, so a hospital
+     * will sometimes get a reversal followed immediately by a fresh receipt.
+     * That is mildly noisy and every message is true. The alternative —
+     * saying nothing — is an outstanding balance that climbs back up with no
+     * explanation, which is the version that produces an angry call and a
+     * payment made against the wrong figure.
+     *
+     * The balance is read back AFTER the update rather than computed, because
+     * the amount a void restores is the trigger's business, not this
+     * function's.
+     */
+    const { rows: after } = await db.query<{ amount_paid_cents: string }>(
+      'SELECT amount_paid_cents FROM subscription_invoices WHERE id = $1',
+      [payment.invoice_id],
+    );
+
+    const remaining = Number(payment.total_cents) - Number(after[0]!.amount_paid_cents);
+
+    const notified = await queueBillingNotice(db, {
+      tenantId: payment.tenant_id,
+      templateKey: 'subscription_payment_voided',
+      payload: {
+        invoiceNumber: payment.invoice_number,
+        hospitalName: payment.tenant_name,
+        amount: formatAmount(Number(payment.amount_cents), payment.currency),
+        reason,
+        balance: formatAmount(remaining, payment.currency),
+        dueDate: formatDay(payment.due_on),
+        invoiceUrl: invoiceDownloadUrl(payment.invoice_id, payment.tenant_id),
+      },
+      dedupeSubject: `sub-payment-void:${paymentId}`,
+      context: { invoiceNumber: payment.invoice_number, paymentId },
+    });
+
+    logger.info(
+      { invoiceNumber: payment.invoice_number, paymentId, notified },
+      'subscription payment voided',
     );
 
     return (await loadInvoice(db, payment.invoice_id))!;
