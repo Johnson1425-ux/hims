@@ -303,6 +303,7 @@ export function Dialog({
   children,
   footer,
   width = '34rem',
+  className,
 }: {
   open: boolean;
   onClose: () => void;
@@ -311,6 +312,14 @@ export function Dialog({
   children: ReactNode;
   footer?: ReactNode;
   width?: string;
+  /**
+   * A class for the portal root. A dialog mounts on `document.body`, OUTSIDE
+   * whatever subtree opened it, so a caller that redefines design tokens on a
+   * wrapper — the platform console remaps the accent onto its vendor amber —
+   * loses them here and renders a dialog in the wrong palette. Passing that
+   * wrapper's class back in is what carries the scope across the portal.
+   */
+  className?: string;
 }): ReactNode {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
@@ -319,7 +328,14 @@ export function Dialog({
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    if (!open) return;
+    // `mounted` is in the dependencies, not just `open`, because the portal
+    // does not exist on the first render. A Dialog that its parent mounts
+    // ALREADY OPEN — the pattern where the parent returns null until there
+    // is something to show — ran this effect once against an empty ref, found
+    // no control to focus, and never ran again: the dialog opened with focus
+    // still on the button behind it. Tab was trapped correctly, so it only
+    // showed up as "the first Tab goes somewhere odd".
+    if (!open || !mounted) return;
 
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const { overflow } = document.body.style;
@@ -327,10 +343,16 @@ export function Dialog({
 
     // Focus the first control rather than the panel, so typing starts
     // immediately — this is a form, and the user came here to fill it in.
-    const first = panel.current?.querySelector<HTMLElement>(
-      'input, select, textarea, button:not([data-dialog-close])',
+    //
+    // Fields are preferred over buttons rather than simply taking the first
+    // of either in document order: a dialog that opens with a row of actions
+    // above its fields would otherwise start on "Open the PDF" instead of on
+    // the amount the operator came here to type.
+    const field = panel.current?.querySelector<HTMLElement>('input, select, textarea');
+    const button = panel.current?.querySelector<HTMLElement>(
+      'button:not([data-dialog-close])',
     );
-    (first ?? panel.current)?.focus();
+    (field ?? button ?? panel.current)?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -369,7 +391,7 @@ export function Dialog({
       document.body.style.overflow = overflow;
       previouslyFocused?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open, mounted, onClose]);
 
   const value = useMemo(() => ({ titleId }), [titleId]);
 
@@ -378,7 +400,7 @@ export function Dialog({
   return createPortal(
     <DialogContext.Provider value={value}>
       <div
-        className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8"
+        className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8${className ? ` ${className}` : ''}`}
         style={{ background: 'color-mix(in srgb, var(--ink) 45%, transparent)' }}
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) onClose();
@@ -456,6 +478,7 @@ export function FormDialog({
   children,
   width,
   disabled,
+  className,
 }: {
   open: boolean;
   onClose: () => void;
@@ -468,6 +491,8 @@ export function FormDialog({
   children: ReactNode;
   width?: string;
   disabled?: boolean;
+  /** Passed through to `Dialog` — see the note there. */
+  className?: string;
 }): ReactNode {
   const [submitting, setSubmitting] = useState(false);
 
@@ -490,6 +515,7 @@ export function FormDialog({
       title={title}
       description={description}
       width={width}
+      className={className}
       footer={
         <>
           <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>

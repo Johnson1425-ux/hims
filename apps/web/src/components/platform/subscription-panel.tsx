@@ -20,19 +20,20 @@ import {
 } from '@/lib/platform-api';
 import { formatMoney } from '@/lib/format';
 import {
-  ConsoleBadge,
-  ConsoleButton,
-  ConsoleCard,
-  ConsoleTable,
-  ConsoleTd,
-  ConsoleTh,
-} from './console-shell';
-
-const field = {
-  background: '#0b1220',
-  color: '#e2e8f0',
-  border: '1px solid #334155',
-} as const;
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  Skeleton,
+  StatTile,
+  Table,
+  Td,
+  Th,
+  Tr,
+} from '@/components/ui/primitives';
+import { Field, Select } from '@/components/ui/forms';
+import { StatusBadge } from './console-shell';
 
 export function SubscriptionPanel({ tenantId }: { tenantId: string }) {
   const [subscription, setSubscription] = useState<SubscriptionRow | null>(null);
@@ -108,28 +109,35 @@ export function SubscriptionPanel({ tenantId }: { tenantId: string }) {
 
   if (status === 'loading') {
     return (
-      <ConsoleCard title="Subscription">
-        <p className="text-[0.875rem]" style={{ color: '#64748b' }}>
-          Loading…
-        </p>
-      </ConsoleCard>
+      <Card>
+        <CardHeader title="Subscription" />
+        <Skeleton className="w-full" height={96} />
+      </Card>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <Card>
+        <CardHeader title="Subscription" />
+        <Alert tone="critical" title="The subscription could not be loaded">
+          Reload the page, or check that your console session is still valid.
+        </Alert>
+      </Card>
     );
   }
 
   if (!subscription) {
     return (
-      <ConsoleCard
-        title="Subscription"
-        subtitle="This hospital has no billing terms yet, so it is invisible to the billing run"
-      >
-        <ConsoleButton
-          variant="primary"
-          disabled={busy}
-          onClick={() => void put({ status: 'active' })}
-        >
-          {busy ? 'Setting up…' : 'Set up billing'}
-        </ConsoleButton>
-      </ConsoleCard>
+      <Card>
+        <CardHeader
+          title="Subscription"
+          subtitle="This hospital has no billing terms yet, so it is invisible to the billing run"
+        />
+        <Button variant="primary" loading={busy} onClick={() => void put({ status: 'active' })}>
+          Set up billing
+        </Button>
+      </Card>
     );
   }
 
@@ -138,105 +146,109 @@ export function SubscriptionPanel({ tenantId }: { tenantId: string }) {
   const overdue = Number(subscription.overdue_cents);
 
   return (
-    <ConsoleCard
-      title="Subscription"
-      subtitle={`${subscription.tier} · ${subscription.currency} · per ${subscription.billing_interval}`}
-      action={
-        !editing ? (
-          <ConsoleButton onClick={() => setEditing(true)}>Change terms</ConsoleButton>
-        ) : null
-      }
-    >
+    <Card>
+      <CardHeader
+        title="Subscription"
+        subtitle={`${subscription.tier} · ${subscription.currency} · per ${subscription.billing_interval}`}
+        action={
+          <div className="flex items-center gap-2">
+            <StatusBadge value={subscription.status} />
+            {!editing ? (
+              <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+                Change terms
+              </Button>
+            ) : null}
+          </div>
+        }
+      />
+
       {message ? (
-        <div
-          className="mb-4 rounded-[8px] px-3 py-2.5 text-[0.8125rem]"
-          style={{ background: '#450a0a', color: '#fecaca' }}
-        >
-          {message}
+        <div className="mb-4">
+          <Alert tone="critical">{message}</Alert>
         </div>
       ) : null}
 
-      <div className="mb-4 grid gap-4 sm:grid-cols-4">
-        <Figure
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatTile
           label="Rate"
           value={formatMoney(effective, subscription.currency)}
-          hint={subscription.has_negotiated_rate ? 'negotiated' : 'published price'}
+          hint={
+            subscription.has_negotiated_rate ? (
+              <Badge tone="info" dot>
+                negotiated
+              </Badge>
+            ) : (
+              'published price'
+            )
+          }
         />
-        <Figure label="Paid up to" value={subscription.current_period_end.slice(0, 10)} />
-        <Figure
+        <StatTile
+          label="Paid up to"
+          value={subscription.current_period_end.slice(0, 10)}
+          hint="next invoice covers from here"
+        />
+        <StatTile
           label="Outstanding"
           value={formatMoney(outstanding, subscription.currency)}
+          hint={outstanding > 0 ? 'issued, not yet paid' : 'nothing owing'}
         />
-        <Figure
+        <StatTile
           label="Overdue"
           value={formatMoney(overdue, subscription.currency)}
-          alarming={overdue > 0}
+          tone={overdue > 0 ? 'warning' : 'neutral'}
+          hint={overdue > 0 ? 'past its payment terms' : 'nothing late'}
         />
       </div>
 
       {subscription.has_negotiated_rate ? (
-        <div
-          className="mb-4 rounded-[8px] px-3 py-2.5 text-[0.8125rem]"
-          style={{ background: '#1e293b', color: '#cbd5e1' }}
-        >
-          This hospital is on a <strong>negotiated rate</strong> and will not follow changes to
-          the price book. Clear it to put them back on the published price for their tier.
+        <div className="mb-4">
+          <Alert tone="info" title="On a negotiated rate">
+            This hospital will not follow changes to the price book. Clear the rate to put them
+            back on the published price for their tier.
+          </Alert>
         </div>
       ) : null}
 
       {editing ? (
-        <div className="mb-4 flex flex-col gap-3 rounded-[8px] p-3" style={{ background: '#0b1220' }}>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label htmlFor="rate" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-                Negotiated rate ({subscription.currency})
-              </label>
-              <input
-                id="rate"
-                inputMode="numeric"
-                value={rate}
-                placeholder="Leave empty to use the price book"
-                onChange={(event) => setRate(event.target.value.replace(/[^0-9]/g, ''))}
-                className="h-9 w-full rounded-[6px] px-3 text-[0.875rem] tabular-nums"
-                style={field}
-              />
-            </div>
-            <div>
-              <label htmlFor="subStatus" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-                Status
-              </label>
-              <select
-                id="subStatus"
-                value={subStatus}
-                onChange={(event) => setSubStatus(event.target.value)}
-                className="h-9 w-full rounded-[6px] px-3 text-[0.875rem]"
-                style={field}
-              >
-                <option value="trialing">Trialing — not invoiced</option>
-                <option value="active">Active — invoiced each period</option>
-                <option value="cancelled">Cancelled — not invoiced</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="subNotes" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-              Notes
-            </label>
-            <input
-              id="subNotes"
-              value={notes}
-              placeholder="Contract reference, who agreed it"
-              onChange={(event) => setNotes(event.target.value)}
-              className="h-9 w-full rounded-[6px] px-3 text-[0.875rem]"
-              style={field}
+        <div
+          className="mb-4 flex flex-col gap-4 rounded-[var(--radius-md)] p-4"
+          style={{ background: 'var(--surface-sunken)' }}
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              name="rate"
+              label={`Negotiated rate (${subscription.currency})`}
+              inputMode="numeric"
+              value={rate}
+              placeholder="Leave empty to use the price book"
+              onChange={(event) => setRate(event.target.value.replace(/[^0-9]/g, ''))}
+              hint="Whole units of the currency, no decimal point."
+            />
+            <Select
+              name="subStatus"
+              label="Status"
+              value={subStatus}
+              onChange={(event) => setSubStatus(event.target.value)}
+              options={[
+                { value: 'trialing', label: 'Trialing — not invoiced' },
+                { value: 'active', label: 'Active — invoiced each period' },
+                { value: 'cancelled', label: 'Cancelled — not invoiced' },
+              ]}
             />
           </div>
 
+          <Field
+            name="subNotes"
+            label="Notes"
+            value={notes}
+            placeholder="Contract reference, who agreed it"
+            onChange={(event) => setNotes(event.target.value)}
+          />
+
           <div className="flex flex-wrap gap-2">
-            <ConsoleButton
+            <Button
               variant="primary"
-              disabled={busy}
+              loading={busy}
               onClick={() =>
                 void put({
                   amountCents: rate === '' ? null : Number(rate),
@@ -245,13 +257,14 @@ export function SubscriptionPanel({ tenantId }: { tenantId: string }) {
                 })
               }
             >
-              {busy ? 'Saving…' : 'Save terms'}
-            </ConsoleButton>
-            <ConsoleButton onClick={() => setEditing(false)} disabled={busy}>
+              Save terms
+            </Button>
+            <Button variant="ghost" onClick={() => setEditing(false)} disabled={busy}>
               Cancel
-            </ConsoleButton>
+            </Button>
             {subscription.has_negotiated_rate ? (
-              <ConsoleButton
+              <Button
+                variant="secondary"
                 disabled={busy}
                 onClick={() => {
                   setRate('');
@@ -259,95 +272,75 @@ export function SubscriptionPanel({ tenantId }: { tenantId: string }) {
                 }}
               >
                 Back to the published price
-              </ConsoleButton>
+              </Button>
             ) : null}
           </div>
         </div>
       ) : null}
 
-      <p className="mb-2 text-[0.75rem] tracking-[0.03em] uppercase" style={{ color: '#64748b' }}>
+      <p
+        className="mb-2 text-[0.75rem] font-medium tracking-[0.02em] uppercase"
+        style={{ color: 'var(--ink-muted)' }}
+      >
         Recent invoices
       </p>
 
       {invoices.length === 0 ? (
-        <p className="text-[0.875rem]" style={{ color: '#64748b' }}>
+        <p className="text-[0.875rem]" style={{ color: 'var(--ink-muted)' }}>
           None issued yet.
         </p>
       ) : (
-        <ConsoleTable
-          head={
-            <>
-              <ConsoleTh>Invoice</ConsoleTh>
-              <ConsoleTh>Period</ConsoleTh>
-              <ConsoleTh align="right">Total</ConsoleTh>
-              <ConsoleTh align="right">Balance</ConsoleTh>
-              <ConsoleTh>Status</ConsoleTh>
-            </>
-          }
-        >
-          {invoices.map((invoice) => (
-            <tr key={invoice.id}>
-              <ConsoleTd>
-                <span className="tabular-nums">{invoice.invoice_number}</span>
-              </ConsoleTd>
-              <ConsoleTd muted>
-                <span className="text-[0.8125rem]">
-                  {invoice.period_start.slice(0, 10)} → {invoice.period_end.slice(0, 10)}
-                </span>
-              </ConsoleTd>
-              <ConsoleTd align="right">
-                <span className="tabular-nums">
-                  {formatMoney(Number(invoice.total_cents), invoice.currency)}
-                </span>
-              </ConsoleTd>
-              <ConsoleTd align="right">
-                <span className="tabular-nums" style={{ color: invoice.is_overdue ? '#fbbf24' : undefined }}>
-                  {formatMoney(Number(invoice.balance_cents), invoice.currency)}
-                </span>
-              </ConsoleTd>
-              <ConsoleTd>
-                <ConsoleBadge value={invoice.status} />
-                {invoice.is_overdue ? (
-                  <div className="mt-1 text-[0.75rem]" style={{ color: '#fbbf24' }}>
-                    {invoice.days_overdue}d overdue
-                  </div>
-                ) : null}
-              </ConsoleTd>
+        <Table className="min-w-[44rem]">
+          <thead>
+            <tr>
+              <Th>Invoice</Th>
+              <Th>Period</Th>
+              <Th align="right">Total</Th>
+              <Th align="right">Balance</Th>
+              <Th>Status</Th>
             </tr>
-          ))}
-        </ConsoleTable>
+          </thead>
+          <tbody>
+            {invoices.map((invoice) => (
+              <Tr key={invoice.id}>
+                <Td numeric className="font-medium">
+                  {invoice.invoice_number}
+                </Td>
+                <Td numeric style={{ color: 'var(--ink-secondary)' }}>
+                  <span className="text-[0.8125rem]">
+                    {invoice.period_start.slice(0, 10)} → {invoice.period_end.slice(0, 10)}
+                  </span>
+                </Td>
+                <Td align="right" numeric>
+                  {formatMoney(Number(invoice.total_cents), invoice.currency)}
+                </Td>
+                <Td
+                  align="right"
+                  numeric
+                  style={{
+                    color: invoice.is_overdue ? 'var(--warning-ink)' : undefined,
+                    fontWeight: invoice.is_overdue ? 600 : undefined,
+                  }}
+                >
+                  {invoice.status === 'void' ? (
+                    <span style={{ color: 'var(--ink-muted)' }}>—</span>
+                  ) : (
+                    formatMoney(Number(invoice.balance_cents), invoice.currency)
+                  )}
+                </Td>
+                <Td>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <StatusBadge value={invoice.status} />
+                    {invoice.is_overdue ? (
+                      <Badge tone="warning">{invoice.days_overdue}d late</Badge>
+                    ) : null}
+                  </div>
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
       )}
-    </ConsoleCard>
-  );
-}
-
-function Figure({
-  label,
-  value,
-  hint,
-  alarming,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  alarming?: boolean;
-}) {
-  return (
-    <div>
-      <p className="text-[0.75rem] tracking-[0.03em] uppercase" style={{ color: '#64748b' }}>
-        {label}
-      </p>
-      <p
-        className="mt-1 text-[1rem] font-semibold tabular-nums"
-        style={{ color: alarming ? '#fbbf24' : '#f1f5f9' }}
-      >
-        {value}
-      </p>
-      {hint ? (
-        <p className="text-[0.75rem]" style={{ color: '#64748b' }}>
-          {hint}
-        </p>
-      ) : null}
-    </div>
+    </Card>
   );
 }

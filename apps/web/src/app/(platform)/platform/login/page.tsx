@@ -13,7 +13,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ApiError } from '@/lib/platform-api';
 import { usePlatformSession } from '@/lib/platform-session';
-import { ConsoleButton } from '@/components/platform/console-shell';
+import { Alert, Button, Card } from '@/components/ui/primitives';
+import { Field } from '@/components/ui/forms';
+import { ConsoleBrandMark } from '@/components/platform/console-shell';
 
 export default function PlatformLoginPage() {
   const { signIn, status } = usePlatformSession();
@@ -43,94 +45,55 @@ export default function PlatformLoginPage() {
     }
   };
 
-  const field = {
-    background: '#0b1220',
-    color: '#e2e8f0',
-    border: '1px solid #334155',
-  } as const;
-
   return (
     <div className="console-root flex min-h-screen items-center justify-center p-5">
       <div className="w-full max-w-[26rem]">
-        <div className="mb-6 flex items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="flex h-9 w-9 items-center justify-center rounded-[8px] text-[1rem] font-bold"
-            style={{ background: '#f59e0b', color: '#0b1220' }}
-          >
-            V
-          </span>
-          <div>
-            <h1 className="text-[1.125rem] font-semibold" style={{ color: '#f1f5f9' }}>
-              Platform console
-            </h1>
-            <p className="text-[0.8125rem]" style={{ color: '#64748b' }}>
-              Vendor operations across every hospital
-            </p>
-          </div>
+        <ConsoleBrandMark
+          title="Platform console"
+          subtitle="Vendor operations across every hospital"
+        />
+
+        <div className="mb-5">
+          <Alert tone="warning" title="This is not a hospital sign-in">
+            Staff accounts do not work here, and console accounts do not work on a hospital.
+            Everything done here is recorded against your name in the audit trail of each
+            hospital it touches.
+          </Alert>
         </div>
 
-        <div
-          className="mb-5 rounded-[8px] px-4 py-3 text-[0.8125rem]"
-          style={{ background: '#78350f', color: '#fde68a' }}
-        >
-          This is not a hospital sign-in. Staff accounts do not work here, and console
-          accounts do not work on a hospital. Everything done here is recorded against your
-          name in the audit trail of each hospital it touches.
-        </div>
+        <Card>
+          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            {error ? <Alert tone="critical">{error}</Alert> : null}
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          {error ? (
-            <div
-              className="rounded-[8px] px-3 py-2.5 text-[0.8125rem]"
-              style={{ background: '#450a0a', color: '#fecaca' }}
-            >
-              {error}
-            </div>
-          ) : null}
-
-          <div>
-            <label htmlFor="email" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-              Operator email
-            </label>
-            <input
-              id="email"
+            <Field
               name="email"
+              label="Operator email"
               type="email"
               autoComplete="username"
               required
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              className="h-10 w-full rounded-[6px] px-3 text-[0.875rem]"
-              style={field}
             />
-          </div>
 
-          <div>
-            <label htmlFor="password" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-              Password
-            </label>
-            <input
-              id="password"
+            <Field
               name="password"
+              label="Password"
               type="password"
               autoComplete="current-password"
               required
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="h-10 w-full rounded-[6px] px-3 text-[0.875rem]"
-              style={field}
             />
-          </div>
 
-          <ConsoleButton type="submit" variant="primary" disabled={submitting}>
-            {submitting ? 'Signing in…' : 'Sign in to the console'}
-          </ConsoleButton>
-        </form>
+            <Button type="submit" variant="primary" size="lg" loading={submitting}>
+              {submitting ? 'Signing in…' : 'Sign in to the console'}
+            </Button>
+          </form>
+        </Card>
 
-        <p className="mt-6 text-center text-[0.8125rem]" style={{ color: '#475569' }}>
+        <p className="mt-6 text-center text-[0.8125rem]" style={{ color: 'var(--ink-muted)' }}>
           Looking for a hospital?{' '}
-          <Link href="/login" style={{ color: '#94a3b8', textDecoration: 'underline' }}>
+          <Link href="/login" className="underline" style={{ color: 'var(--ink-secondary)' }}>
             Staff sign-in
           </Link>
         </p>

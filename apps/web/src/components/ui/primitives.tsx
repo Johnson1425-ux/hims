@@ -441,6 +441,7 @@ export function Td({
   align = 'left',
   className,
   numeric = false,
+  colSpan,
   style,
 }: {
   children?: ReactNode;
@@ -448,10 +449,13 @@ export function Td({
   className?: string;
   /** `numeric` applies tabular figures, so columns of numbers line up. */
   numeric?: boolean;
+  /** Needed for the one row a table shows when it has no rows. */
+  colSpan?: number;
   style?: React.CSSProperties;
 }): ReactNode {
   return (
     <td
+      colSpan={colSpan}
       style={{ textAlign: align, borderBottom: '1px solid var(--line)', ...style }}
       className={cx('px-3 py-2.5 align-middle', numeric && 'tabular', className)}
     >

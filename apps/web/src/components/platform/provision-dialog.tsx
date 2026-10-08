@@ -17,11 +17,15 @@
 import { useEffect, useState } from 'react';
 import { ApiError, platformApi } from '@/lib/platform-api';
 import { TimezoneSelect, detectTimezone } from '@/components/ui/timezone-select';
-import { ConsoleButton } from './console-shell';
+import { Dialog, Field, FieldSet, FormDialog, Select } from '@/components/ui/forms';
+import { Alert, Button } from '@/components/ui/primitives';
 
 const CURRENCIES = ['TZS', 'KES', 'UGX', 'USD', 'EUR', 'GBP'];
 const TIERS = ['trial', 'standard', 'enterprise'];
 const KINDS = ['hospital', 'clinic', 'lab', 'pharmacy', 'imaging'];
+
+const asOptions = (values: string[]) =>
+  values.map((value) => ({ value, label: value[0]!.toUpperCase() + value.slice(1) }));
 
 interface Values {
   slug: string;
@@ -61,94 +65,6 @@ const EMPTY: Values = {
   adminFamilyName: '',
 };
 
-const fieldStyle = (invalid: boolean) => ({
-  background: '#0b1220',
-  color: '#e2e8f0',
-  border: `1px solid ${invalid ? '#991b1b' : '#334155'}`,
-});
-
-function Field({
-  name,
-  label,
-  value,
-  onChange,
-  error,
-  hint,
-  placeholder,
-  type = 'text',
-}: {
-  name: string;
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  error?: string;
-  hint?: string;
-  placeholder?: string;
-  type?: string;
-}) {
-  return (
-    <div>
-      <label htmlFor={name} className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-        {label}
-      </label>
-      <input
-        id={name}
-        name={name}
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-full rounded-[6px] px-3 text-[0.875rem]"
-        style={fieldStyle(Boolean(error))}
-      />
-      {error ? (
-        <p className="mt-1 text-[0.75rem]" style={{ color: '#fca5a5' }}>
-          {error}
-        </p>
-      ) : hint ? (
-        <p className="mt-1 text-[0.75rem]" style={{ color: '#64748b' }}>
-          {hint}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function Picker({
-  name,
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  name: string;
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div>
-      <label htmlFor={name} className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-        {label}
-      </label>
-      <select
-        id={name}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-full rounded-[6px] px-3 text-[0.875rem] capitalize"
-        style={fieldStyle(false)}
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
 export function ProvisionDialog({
   open,
   onClose,
@@ -161,8 +77,8 @@ export function ProvisionDialog({
   const [values, setValues] = useState<Values>(EMPTY);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<{ name: string; inviteUrl: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -170,9 +86,8 @@ export function ProvisionDialog({
     setErrors({});
     setMessage(null);
     setDone(null);
+    setCopied(false);
   }, [open]);
-
-  if (!open) return null;
 
   const set = <K extends keyof Values>(key: K, value: Values[K]) =>
     setValues((previous) => ({ ...previous, [key]: value }));
@@ -188,8 +103,7 @@ export function ProvisionDialog({
         previous.facilityName === '' || previous.facilityName === `${previous.displayName} - Main`
           ? `${name} - Main`
           : previous.facilityName,
-      slug:
-        previous.slug === slugify(previous.displayName) ? slugify(name) : previous.slug,
+      slug: previous.slug === slugify(previous.displayName) ? slugify(name) : previous.slug,
     }));
   };
 
@@ -204,11 +118,7 @@ export function ProvisionDialog({
     values.adminGivenName.length >= 1 &&
     values.adminFamilyName.length >= 1;
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (submitting) return;
-
-    setSubmitting(true);
+  const submit = async () => {
     setErrors({});
     setMessage(null);
 
@@ -233,244 +143,205 @@ export function ProvisionDialog({
       } else {
         setMessage('Something went wrong. Please try again.');
       }
-    } finally {
-      setSubmitting(false);
     }
   };
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8"
-      style={{ background: 'rgba(2, 6, 23, 0.8)' }}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !submitting) onClose();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Provision a hospital"
-        className="w-full max-w-[46rem] rounded-[10px]"
-        style={{ background: '#111827', border: '1px solid #1f2937' }}
+  /*
+   * The handover screen is a separate Dialog rather than a branch inside the
+   * form one, because it is not a form: there is nothing to submit, and the
+   * only thing it must not do is let the operator leave without the link.
+   */
+  if (done) {
+    return (
+      <Dialog
+        open={open}
+        onClose={onClose}
+        className="console-root"
+        title={`${done.name} is live`}
+        description="The hospital, its first site and its administrator account all exist."
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                void navigator.clipboard?.writeText(done.inviteUrl);
+                setCopied(true);
+              }}
+            >
+              {copied ? 'Copied' : 'Copy link'}
+            </Button>
+            <Button variant="primary" onClick={onClose}>
+              Done
+            </Button>
+          </>
+        }
       >
-        {done ? (
-          <div className="p-6">
-            <h2 className="text-[1.125rem] font-semibold" style={{ color: '#f1f5f9' }}>
-              {done.name} is live
-            </h2>
-            <p className="mt-2 text-[0.875rem]" style={{ color: '#94a3b8' }}>
-              The hospital, its first site and its administrator account all exist. The
-              administrator has no password yet — send them this link so they can choose one.
-            </p>
+        <Alert tone="warning" title="Copy this link now">
+          It is valid for seven days, can be used once, and is not stored anywhere you can read
+          it again. The administrator has no password until they follow it.
+        </Alert>
 
-            <div
-              className="mt-4 rounded-[8px] px-3 py-2.5 text-[0.8125rem] break-all"
-              style={{ background: '#0b1220', color: '#fcd34d', border: '1px solid #334155' }}
-            >
-              {done.inviteUrl}
-            </div>
+        <p
+          className="mt-4 rounded-[var(--radius-md)] px-3 py-2.5 font-mono text-[0.8125rem] break-all"
+          style={{
+            background: 'var(--surface-sunken)',
+            color: 'var(--ink)',
+            border: '1px solid var(--line)',
+          }}
+        >
+          {done.inviteUrl}
+        </p>
+      </Dialog>
+    );
+  }
 
-            <p className="mt-3 text-[0.8125rem]" style={{ color: '#64748b' }}>
-              It is valid for seven days and can be used once. It is not stored anywhere you can
-              read it again, so copy it now.
-            </p>
+  return (
+    <FormDialog
+      open={open}
+      onClose={onClose}
+      className="console-root"
+      title="Provision a hospital"
+      description="Creates the tenant, its encryption key, its first site and its first administrator — all or nothing."
+      submitLabel="Provision hospital"
+      onSubmit={submit}
+      message={message}
+      disabled={!ready}
+      width="46rem"
+    >
+      <FieldSet legend="The hospital">
+        <Field
+          name="displayName"
+          label="Display name"
+          value={values.displayName}
+          error={errors.displayName}
+          onChange={(event) => setDisplayName(event.target.value)}
+          placeholder="KCMC Moshi"
+        />
+        <Field
+          name="legalName"
+          label="Legal name"
+          value={values.legalName}
+          error={errors.legalName}
+          onChange={(event) => set('legalName', event.target.value)}
+          hint="As it appears on invoices"
+        />
+        <Field
+          name="slug"
+          label="Slug"
+          value={values.slug}
+          error={errors.slug}
+          onChange={(event) => set('slug', event.target.value.toLowerCase())}
+          hint="Typed at sign-in when an email exists at two hospitals. Permanent."
+        />
+        <Field
+          name="facilityCode"
+          label="Facility code"
+          value={values.facilityCode}
+          error={errors.facilityCode}
+          onChange={(event) => set('facilityCode', event.target.value.toUpperCase())}
+          hint="Woven into every MRN — MRN-KCMC-000042. Permanent."
+        />
+        <TimezoneSelect
+          name="provisionTimezone"
+          value={values.timezone}
+          error={errors.timezone}
+          onChange={(v) => set('timezone', v)}
+        />
+        <Field
+          name="locale"
+          label="Locale"
+          value={values.locale}
+          error={errors.locale}
+          onChange={(event) => set('locale', event.target.value)}
+          hint="en-TZ, sw-TZ, en-KE…"
+        />
+        <Select
+          name="currency"
+          label="Billing currency"
+          value={values.currency}
+          options={CURRENCIES.map((value) => ({ value, label: value }))}
+          onChange={(event) => set('currency', event.target.value)}
+        />
+        <Select
+          name="subscriptionTier"
+          label="Plan"
+          value={values.subscriptionTier}
+          options={asOptions(TIERS)}
+          onChange={(event) => set('subscriptionTier', event.target.value)}
+        />
+      </FieldSet>
 
-            <div className="mt-5 flex justify-end gap-2">
-              <ConsoleButton
-                onClick={() => {
-                  void navigator.clipboard?.writeText(done.inviteUrl);
-                }}
-              >
-                Copy link
-              </ConsoleButton>
-              <ConsoleButton variant="primary" onClick={onClose}>
-                Done
-              </ConsoleButton>
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={submit}>
-            <div className="px-6 pt-5 pb-2">
-              <h2 className="text-[1.125rem] font-semibold" style={{ color: '#f1f5f9' }}>
-                Provision a hospital
-              </h2>
-              <p className="mt-1 text-[0.8125rem]" style={{ color: '#64748b' }}>
-                Creates the tenant, its encryption key, its first site and its first
-                administrator — all or nothing.
-              </p>
-            </div>
+      <FieldSet
+        legend="Its first site"
+        description="More sites are added by the hospital, from their own settings screen."
+      >
+        <Field
+          name="facilityName"
+          label="Site name"
+          value={values.facilityName}
+          error={errors.facilityName}
+          onChange={(event) => set('facilityName', event.target.value)}
+        />
+        <Select
+          name="facilityKind"
+          label="Kind"
+          value={values.facilityKind}
+          options={asOptions(KINDS)}
+          onChange={(event) => set('facilityKind', event.target.value)}
+        />
+        <Field
+          name="city"
+          label="City"
+          value={values.city}
+          error={errors.city}
+          onChange={(event) => set('city', event.target.value)}
+        />
+        <Field
+          name="country"
+          label="Country"
+          value={values.country}
+          error={errors.country}
+          onChange={(event) => set('country', event.target.value.toUpperCase())}
+          hint="Two-letter ISO code"
+        />
+      </FieldSet>
 
-            <div className="max-h-[60vh] overflow-y-auto px-6 py-3">
-              {message ? (
-                <div
-                  className="mb-4 rounded-[8px] px-3 py-2.5 text-[0.8125rem]"
-                  style={{ background: '#450a0a', color: '#fecaca' }}
-                >
-                  {message}
-                </div>
-              ) : null}
-
-              <p className="mb-3 text-[0.75rem] font-medium tracking-[0.03em] uppercase" style={{ color: '#64748b' }}>
-                The hospital
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  name="displayName"
-                  label="Display name"
-                  value={values.displayName}
-                  error={errors.displayName}
-                  onChange={setDisplayName}
-                  placeholder="KCMC Moshi"
-                />
-                <Field
-                  name="legalName"
-                  label="Legal name"
-                  value={values.legalName}
-                  error={errors.legalName}
-                  onChange={(v) => set('legalName', v)}
-                  hint="As it appears on invoices"
-                />
-                <Field
-                  name="slug"
-                  label="Slug"
-                  value={values.slug}
-                  error={errors.slug}
-                  onChange={(v) => set('slug', v.toLowerCase())}
-                  hint="Typed at sign-in when an email exists at two hospitals. Permanent."
-                />
-                <Field
-                  name="facilityCode"
-                  label="Facility code"
-                  value={values.facilityCode}
-                  error={errors.facilityCode}
-                  onChange={(v) => set('facilityCode', v.toUpperCase())}
-                  hint="Woven into every MRN — MRN-KCMC-000042. Permanent."
-                />
-                <TimezoneSelect
-                  name="provisionTimezone"
-                  value={values.timezone}
-                  error={errors.timezone}
-                  onChange={(v) => set('timezone', v)}
-                />
-                <Field
-                  name="locale"
-                  label="Locale"
-                  value={values.locale}
-                  error={errors.locale}
-                  onChange={(v) => set('locale', v)}
-                  hint="en-TZ, sw-TZ, en-KE…"
-                />
-                <Picker
-                  name="currency"
-                  label="Billing currency"
-                  value={values.currency}
-                  options={CURRENCIES}
-                  onChange={(v) => set('currency', v)}
-                />
-                <Picker
-                  name="subscriptionTier"
-                  label="Plan"
-                  value={values.subscriptionTier}
-                  options={TIERS}
-                  onChange={(v) => set('subscriptionTier', v)}
-                />
-              </div>
-
-              <p
-                className="mt-6 mb-3 text-[0.75rem] font-medium tracking-[0.03em] uppercase"
-                style={{ color: '#64748b' }}
-              >
-                Its first site
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  name="facilityName"
-                  label="Site name"
-                  value={values.facilityName}
-                  error={errors.facilityName}
-                  onChange={(v) => set('facilityName', v)}
-                  hint="More sites are added from the hospital's own settings"
-                />
-                <Picker
-                  name="facilityKind"
-                  label="Kind"
-                  value={values.facilityKind}
-                  options={KINDS}
-                  onChange={(v) => set('facilityKind', v)}
-                />
-                <Field
-                  name="city"
-                  label="City"
-                  value={values.city}
-                  error={errors.city}
-                  onChange={(v) => set('city', v)}
-                />
-                <Field
-                  name="country"
-                  label="Country"
-                  value={values.country}
-                  error={errors.country}
-                  onChange={(v) => set('country', v.toUpperCase())}
-                  hint="Two-letter ISO code"
-                />
-              </div>
-
-              <p
-                className="mt-6 mb-3 text-[0.75rem] font-medium tracking-[0.03em] uppercase"
-                style={{ color: '#64748b' }}
-              >
-                Its first administrator
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  name="adminEmail"
-                  label="Email"
-                  type="email"
-                  value={values.adminEmail}
-                  error={errors.adminEmail}
-                  onChange={(v) => set('adminEmail', v)}
-                  hint="They choose their own password from an invitation link"
-                />
-                <Field
-                  name="adminFullName"
-                  label="Full name"
-                  value={values.adminFullName}
-                  error={errors.adminFullName}
-                  onChange={(v) => set('adminFullName', v)}
-                  placeholder="Neema Mushi"
-                />
-                <Field
-                  name="adminGivenName"
-                  label="Given name"
-                  value={values.adminGivenName}
-                  error={errors.adminGivenName}
-                  onChange={(v) => set('adminGivenName', v)}
-                />
-                <Field
-                  name="adminFamilyName"
-                  label="Family name"
-                  value={values.adminFamilyName}
-                  error={errors.adminFamilyName}
-                  onChange={(v) => set('adminFamilyName', v)}
-                />
-              </div>
-            </div>
-
-            <div
-              className="flex items-center justify-end gap-2 px-6 py-4"
-              style={{ borderTop: '1px solid #1f2937' }}
-            >
-              <ConsoleButton onClick={onClose} disabled={submitting}>
-                Cancel
-              </ConsoleButton>
-              <ConsoleButton type="submit" variant="primary" disabled={!ready || submitting}>
-                {submitting ? 'Provisioning…' : 'Provision hospital'}
-              </ConsoleButton>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
+      <FieldSet
+        legend="Its first administrator"
+        description="They choose their own password from an invitation link, which you hand over at the end."
+      >
+        <Field
+          name="adminEmail"
+          label="Email"
+          type="email"
+          value={values.adminEmail}
+          error={errors.adminEmail}
+          onChange={(event) => set('adminEmail', event.target.value)}
+        />
+        <Field
+          name="adminFullName"
+          label="Full name"
+          value={values.adminFullName}
+          error={errors.adminFullName}
+          onChange={(event) => set('adminFullName', event.target.value)}
+          placeholder="Neema Mushi"
+        />
+        <Field
+          name="adminGivenName"
+          label="Given name"
+          value={values.adminGivenName}
+          error={errors.adminGivenName}
+          onChange={(event) => set('adminGivenName', event.target.value)}
+        />
+        <Field
+          name="adminFamilyName"
+          label="Family name"
+          value={values.adminFamilyName}
+          error={errors.adminFamilyName}
+          onChange={(event) => set('adminFamilyName', event.target.value)}
+        />
+      </FieldSet>
+    </FormDialog>
   );
 }
 

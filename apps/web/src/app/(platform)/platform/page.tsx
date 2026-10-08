@@ -12,15 +12,23 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ApiError, platformApi, type PlatformSummary, type TenantRow } from '@/lib/platform-api';
 import {
-  ConsoleBadge,
-  ConsoleButton,
-  ConsoleCard,
+  Alert,
+  Button,
+  Card,
+  EmptyState,
+  Skeleton,
+  StatTile,
+  Table,
+  Td,
+  Th,
+  Tr,
+} from '@/components/ui/primitives';
+import {
   ConsoleShell,
-  ConsoleStat,
-  ConsoleTable,
-  ConsoleTd,
-  ConsoleTh,
+  PageHeader,
+  StatusBadge,
 } from '@/components/platform/console-shell';
+import { IconPlus, IconSearch } from '@/components/layout/icons';
 import { ProvisionDialog } from '@/components/platform/provision-dialog';
 
 function relative(iso: string | null): string {
@@ -94,131 +102,211 @@ function Fleet() {
 
   if (status === 'loading') {
     return (
-      <p className="text-[0.875rem]" style={{ color: '#64748b' }}>
-        Loading the fleet…
-      </p>
+      <>
+        <PageHeader title="Hospitals" subtitle="Every tenant in this deployment" />
+        <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((n) => (
+            <Card key={n}>
+              <Skeleton className="w-24" height={12} />
+              <Skeleton className="mt-3 w-16" height={28} />
+            </Card>
+          ))}
+        </div>
+        <Card>
+          <Skeleton className="w-full" height={200} />
+        </Card>
+      </>
     );
   }
 
   if (status === 'error') {
     return (
-      <div
-        className="rounded-[8px] px-4 py-3 text-[0.875rem]"
-        style={{ background: '#450a0a', color: '#fecaca' }}
-      >
-        {error}
-      </div>
+      <>
+        <PageHeader title="Hospitals" />
+        <Alert tone="critical" title="The console could not be loaded">
+          {error}
+        </Alert>
+      </>
     );
   }
 
   return (
     <>
+      <PageHeader
+        title="Hospitals"
+        subtitle="Every tenant in this deployment"
+        action={
+          <Button variant="primary" icon={<IconPlus />} onClick={() => setProvisioning(true)}>
+            Provision a hospital
+          </Button>
+        }
+      />
+
       {/*
         The chain banner is the first thing on the page when it is broken.
         A tamper-evident log nobody looks at is a log, not evidence.
       */}
       {chain && !chain.intact ? (
-        <div
-          className="mb-5 rounded-[8px] px-4 py-3 text-[0.875rem]"
-          style={{ background: '#450a0a', color: '#fecaca' }}
-        >
-          <strong>The audit hash chain does not reconcile</strong>, first at row{' '}
-          {chain.brokenAtId}. Rows after a break cannot be trusted to be unaltered. Treat this
-          as a security incident.
+        <div className="mb-5">
+          <Alert tone="critical" title="The audit hash chain does not reconcile">
+            First at row {chain.brokenAtId}. Rows after a break cannot be trusted to be
+            unaltered. Treat this as a security incident.
+          </Alert>
         </div>
       ) : null}
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <ConsoleStat label="Hospitals" value={summary?.tenant_count ?? '0'} hint={`${summary?.active_tenants ?? 0} active`} />
-        <ConsoleStat label="Suspended" value={summary?.suspended_tenants ?? '0'} tone="warning" />
-        <ConsoleStat label="Staff accounts" value={summary?.active_users ?? '0'} hint="across every hospital" />
-        <ConsoleStat
+        <StatTile
+          label="Hospitals"
+          value={summary?.tenant_count ?? '0'}
+          hint={`${summary?.active_tenants ?? 0} active`}
+        />
+        <StatTile
+          label="Suspended"
+          value={summary?.suspended_tenants ?? '0'}
+          tone={Number(summary?.suspended_tenants ?? 0) > 0 ? 'serious' : 'neutral'}
+          hint={Number(summary?.suspended_tenants ?? 0) > 0 ? 'cannot sign in' : 'none offline'}
+        />
+        <StatTile
+          label="Staff accounts"
+          value={summary?.active_users ?? '0'}
+          hint="across every hospital"
+        />
+        <StatTile
           label="Unreviewed break-glass"
           value={summary?.unreviewed_break_glass ?? '0'}
-          tone="warning"
+          tone={Number(summary?.unreviewed_break_glass ?? 0) > 0 ? 'warning' : 'neutral'}
           hint="emergency access awaiting a privacy officer"
         />
       </div>
 
-      <ConsoleCard
-        title="Hospitals"
-        subtitle="Every tenant in this deployment"
-        padded={false}
-        action={
-          <ConsoleButton variant="primary" onClick={() => setProvisioning(true)}>
-            Provision a hospital
-          </ConsoleButton>
-        }
-      >
-        <div className="px-5 pb-3">
-          <input
-            type="search"
-            value={query}
-            placeholder="Filter by name or slug…"
-            onChange={(event) => setQuery(event.target.value)}
-            className="h-9 w-full max-w-sm rounded-[6px] px-3 text-[0.875rem]"
-            style={{ background: '#0b1220', color: '#e2e8f0', border: '1px solid #334155' }}
-          />
+      <Card>
+        {/*
+          No heading here: the page is already called Hospitals, and a second
+          copy of the word only competed with the filter for the same row —
+          which at phone width squeezed it to one word per line.
+        */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-[0.8125rem]" style={{ color: 'var(--ink-muted)' }}>
+            {query.trim()
+              ? `${visible.length} of ${tenants.length} match “${query.trim()}”`
+              : `${tenants.length} hospital${tenants.length === 1 ? '' : 's'}, newest first`}
+          </p>
+
+          <div className="relative w-full sm:w-64">
+            <label htmlFor="tenant-filter" className="sr-only">
+              Filter hospitals by name or slug
+            </label>
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
+              style={{ color: 'var(--ink-muted)' }}
+            >
+              <IconSearch />
+            </span>
+            <input
+              id="tenant-filter"
+              type="search"
+              value={query}
+              placeholder="Filter by name or slug…"
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-9 w-full rounded-[var(--radius-md)] pr-3 pl-9 text-[0.875rem]"
+              style={{
+                background: 'var(--surface-sunken)',
+                color: 'var(--ink)',
+                border: '1px solid var(--line)',
+              }}
+            />
+          </div>
         </div>
 
-        <div className="px-5 pb-4">
-          <ConsoleTable
-            head={
-              <>
-                <ConsoleTh>Hospital</ConsoleTh>
-                <ConsoleTh>Status</ConsoleTh>
-                <ConsoleTh>Plan</ConsoleTh>
-                <ConsoleTh align="right">Staff</ConsoleTh>
-                <ConsoleTh align="right">Patients</ConsoleTh>
-                <ConsoleTh align="right">Last active</ConsoleTh>
-              </>
-            }
-          >
+        {/* Six columns do not fit a phone. Scrolling the table beats wrapping
+            a hospital's name to one word per line. */}
+        <Table className="min-w-[46rem]">
+          <thead>
+            <tr>
+              <Th>Hospital</Th>
+              <Th>Status</Th>
+              <Th>Plan</Th>
+              <Th align="right">Staff</Th>
+              <Th align="right">Patients</Th>
+              <Th align="right">Last active</Th>
+            </tr>
+          </thead>
+          <tbody>
             {visible.length === 0 ? (
               <tr>
-                <ConsoleTd muted>
-                  {tenants.length === 0
-                    ? 'No hospitals yet. Provision the first one.'
-                    : 'Nothing matches that filter.'}
-                </ConsoleTd>
+                <Td colSpan={6}>
+                  {tenants.length === 0 ? (
+                    <EmptyState
+                      title="No hospitals yet"
+                      description="Provisioning one creates the tenant, its encryption key, its first site and its first administrator."
+                      action={
+                        <Button variant="primary" onClick={() => setProvisioning(true)}>
+                          Provision the first hospital
+                        </Button>
+                      }
+                    />
+                  ) : (
+                    <EmptyState
+                      title="Nothing matches that filter"
+                      description={`No hospital’s name or slug contains “${query.trim()}”.`}
+                      action={
+                        <Button variant="secondary" onClick={() => setQuery('')}>
+                          Clear the filter
+                        </Button>
+                      }
+                    />
+                  )}
+                </Td>
               </tr>
             ) : (
               visible.map((tenant) => (
-                <tr key={tenant.id}>
-                  <ConsoleTd>
-                    <Link href={`/platform/tenants/${tenant.id}`} className="font-medium hover:underline">
+                <Tr key={tenant.id}>
+                  <Td>
+                    <Link
+                      href={`/platform/tenants/${tenant.id}`}
+                      className="font-medium hover:underline"
+                      style={{ color: 'var(--ink)' }}
+                    >
                       {tenant.display_name}
                     </Link>
-                    <div className="mt-0.5 text-[0.75rem] tabular-nums" style={{ color: '#64748b' }}>
+                    <div
+                      className="tabular mt-0.5 text-[0.75rem]"
+                      style={{ color: 'var(--ink-muted)' }}
+                    >
                       {tenant.slug} · {tenant.facility_code} · {tenant.currency}
                     </div>
-                  </ConsoleTd>
-                  <ConsoleTd>
-                    <ConsoleBadge value={tenant.status} />
+                  </Td>
+                  <Td>
+                    <StatusBadge value={tenant.status} />
                     {tenant.status !== 'active' && tenant.status_reason ? (
-                      <div className="mt-1 max-w-[16rem] text-[0.75rem]" style={{ color: '#64748b' }}>
+                      <div
+                        className="mt-1 max-w-[16rem] text-[0.75rem]"
+                        style={{ color: 'var(--ink-muted)' }}
+                      >
                         {tenant.status_reason}
                       </div>
                     ) : null}
-                  </ConsoleTd>
-                  <ConsoleTd>
-                    <ConsoleBadge value={tenant.subscription_tier} />
-                  </ConsoleTd>
-                  <ConsoleTd align="right" muted>
-                    <span className="tabular-nums">{tenant.active_user_count}</span>
-                  </ConsoleTd>
-                  <ConsoleTd align="right" muted>
-                    <span className="tabular-nums">{tenant.patient_count}</span>
-                  </ConsoleTd>
-                  <ConsoleTd align="right" muted>
+                  </Td>
+                  <Td>
+                    <StatusBadge value={tenant.subscription_tier} />
+                  </Td>
+                  <Td align="right" numeric>
+                    {tenant.active_user_count}
+                  </Td>
+                  <Td align="right" numeric>
+                    {tenant.patient_count}
+                  </Td>
+                  <Td align="right" style={{ color: 'var(--ink-secondary)' }}>
                     {relative(tenant.last_activity_at)}
-                  </ConsoleTd>
-                </tr>
+                  </Td>
+                </Tr>
               ))
             )}
-          </ConsoleTable>
-        </div>
-      </ConsoleCard>
+          </tbody>
+        </Table>
+      </Card>
 
       <ProvisionDialog
         open={provisioning}

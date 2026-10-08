@@ -13,7 +13,6 @@
  */
 import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   ApiError,
   platformApi,
@@ -23,15 +22,21 @@ import {
 } from '@/lib/platform-api';
 import { SubscriptionPanel } from '@/components/platform/subscription-panel';
 import {
-  ConsoleBadge,
-  ConsoleButton,
-  ConsoleCard,
-  ConsoleShell,
-  ConsoleStat,
-  ConsoleTable,
-  ConsoleTd,
-  ConsoleTh,
-} from '@/components/platform/console-shell';
+  Alert,
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  Skeleton,
+  StatTile,
+  Table,
+  Td,
+  Th,
+  Tr,
+  cx,
+} from '@/components/ui/primitives';
+import { Field } from '@/components/ui/forms';
+import { ConsoleShell, PageHeader, StatusBadge } from '@/components/platform/console-shell';
 
 const TIERS = ['trial', 'standard', 'enterprise'] as const;
 
@@ -49,7 +54,6 @@ export default function TenantDetailPage({
 }
 
 function TenantDetailView({ tenantId }: { tenantId: string }) {
-  const router = useRouter();
   const [tenant, setTenant] = useState<TenantDetail | null>(null);
   const [events, setEvents] = useState<AuditRow[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -81,7 +85,9 @@ function TenantDetailView({ tenantId }: { tenantId: string }) {
         setStatus('ready');
       } catch (caught) {
         if (controller.signal.aborted) return;
-        setError(caught instanceof ApiError ? caught.message : 'This hospital could not be loaded.');
+        setError(
+          caught instanceof ApiError ? caught.message : 'This hospital could not be loaded.',
+        );
         setStatus('error');
       }
     })();
@@ -127,159 +133,211 @@ function TenantDetailView({ tenantId }: { tenantId: string }) {
 
   if (status === 'loading') {
     return (
-      <p className="text-[0.875rem]" style={{ color: '#64748b' }}>
-        Loading…
-      </p>
+      <>
+        <PageHeader title="Loading…" back={{ href: '/platform', label: 'All hospitals' }} />
+        <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {[0, 1, 2, 3, 4].map((n) => (
+            <Card key={n}>
+              <Skeleton className="w-20" height={12} />
+              <Skeleton className="mt-3 w-12" height={24} />
+            </Card>
+          ))}
+        </div>
+      </>
     );
   }
 
   if (status === 'error' || !tenant) {
     return (
-      <div className="rounded-[8px] px-4 py-3 text-[0.875rem]" style={{ background: '#450a0a', color: '#fecaca' }}>
-        {error}
-      </div>
+      <>
+        <PageHeader title="Hospital" back={{ href: '/platform', label: 'All hospitals' }} />
+        <Alert tone="critical" title="This hospital could not be loaded">
+          {error}
+        </Alert>
+      </>
     );
   }
 
   return (
     <>
-      <div className="mb-5">
-        <button
-          type="button"
-          onClick={() => router.push('/platform')}
-          className="mb-2 text-[0.8125rem]"
-          style={{ color: '#64748b' }}
-        >
-          ← All hospitals
-        </button>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-[1.375rem] font-semibold" style={{ color: '#f1f5f9' }}>
-            {tenant.display_name}
-          </h1>
-          <ConsoleBadge value={tenant.status} />
-          <ConsoleBadge value={tenant.subscription_tier} />
-        </div>
-        <p className="mt-1 text-[0.8125rem] tabular-nums" style={{ color: '#64748b' }}>
-          {tenant.legal_name} · {tenant.slug} · {tenant.facility_code} · {tenant.timezone} ·{' '}
-          {tenant.currency}
-        </p>
-      </div>
+      <PageHeader
+        title={tenant.display_name}
+        back={{ href: '/platform', label: 'All hospitals' }}
+        badges={
+          <>
+            <StatusBadge value={tenant.status} />
+            <StatusBadge value={tenant.subscription_tier} />
+          </>
+        }
+        subtitle={
+          <span className="tabular">
+            {tenant.legal_name} · {tenant.slug} · {tenant.facility_code} · {tenant.timezone} ·{' '}
+            {tenant.currency}
+          </span>
+        }
+      />
 
       {tenant.status !== 'active' ? (
-        <div
-          className="mb-5 rounded-[8px] px-4 py-3 text-[0.875rem]"
-          style={{ background: '#78350f', color: '#fde68a' }}
-        >
-          <strong className="capitalize">{tenant.status}</strong>
-          {tenant.status_reason ? ` — ${tenant.status_reason}` : null}
-          {tenant.status_changed_at
-            ? ` (${new Date(tenant.status_changed_at).toLocaleString()})`
-            : null}
-          <div className="mt-1 text-[0.8125rem]">
+        <div className="mb-5">
+          <Alert
+            tone={tenant.status === 'archived' ? 'neutral' : 'serious'}
+            title={
+              <span className="capitalize">
+                {tenant.status}
+                {tenant.status_reason ? ` — ${tenant.status_reason}` : null}
+              </span>
+            }
+          >
             Nobody at this hospital can sign in while it is {tenant.status}.
-          </div>
+            {tenant.status_changed_at
+              ? ` Changed ${new Date(tenant.status_changed_at).toLocaleString()}.`
+              : null}
+          </Alert>
         </div>
       ) : null}
 
       {notice ? (
-        <div className="mb-5 rounded-[8px] px-4 py-3 text-[0.875rem]" style={{ background: '#450a0a', color: '#fecaca' }}>
-          {notice}
+        <div className="mb-5">
+          <Alert tone="critical">{notice}</Alert>
         </div>
       ) : null}
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <ConsoleStat label="Staff" value={tenant.active_user_count} hint={`${tenant.invited_user_count} invited`} />
-        <ConsoleStat label="Patients" value={tenant.patient_count} />
-        <ConsoleStat label="Sites" value={tenant.facility_count} />
-        <ConsoleStat label="Departments" value={tenant.department_count} />
-        <ConsoleStat
+        <StatTile
+          label="Staff"
+          value={tenant.active_user_count}
+          hint={`${tenant.invited_user_count} invited`}
+        />
+        <StatTile label="Patients" value={tenant.patient_count} />
+        <StatTile label="Sites" value={tenant.facility_count} />
+        <StatTile label="Departments" value={tenant.department_count} />
+        <StatTile
           label="Unreviewed break-glass"
           value={tenant.unreviewed_break_glass}
-          tone="warning"
+          tone={Number(tenant.unreviewed_break_glass) > 0 ? 'warning' : 'neutral'}
+          hint={
+            Number(tenant.unreviewed_break_glass) > 0
+              ? 'their privacy officer’s to review'
+              : 'all reviewed'
+          }
         />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <ConsoleCard title="Plan" subtitle="Takes effect immediately">
-          <div className="flex flex-wrap gap-2">
-            {TIERS.map((tier) => (
-              <ConsoleButton
-                key={tier}
-                variant={tier === tenant.subscription_tier ? 'primary' : 'secondary'}
-                disabled={busy || tier === tenant.subscription_tier}
-                onClick={() => void changeTier(tier)}
-              >
-                <span className="capitalize">{tier}</span>
-              </ConsoleButton>
-            ))}
-          </div>
-        </ConsoleCard>
+        <Card>
+          <CardHeader
+            title="Plan"
+            subtitle="Takes effect immediately. The negotiated rate, if any, is set below."
+          />
+          {/*
+            A radio group rather than three buttons: the tier is one choice
+            out of three with one of them already true, and a row of buttons
+            where the current one is disabled reads as broken rather than
+            as selected.
+          */}
+          <fieldset disabled={busy}>
+            <legend className="sr-only">Subscription tier</legend>
+            <div
+              className="inline-flex rounded-[var(--radius-md)] p-0.5"
+              style={{ background: 'var(--surface-sunken)' }}
+            >
+              {TIERS.map((tier) => {
+                const active = tier === tenant.subscription_tier;
+                return (
+                  <label
+                    key={tier}
+                    className={cx(
+                      'cursor-pointer rounded-[var(--radius-sm)] px-3.5 py-1.5 text-[0.875rem] capitalize',
+                      'transition-colors duration-100 select-none',
+                      busy && 'cursor-not-allowed opacity-60',
+                    )}
+                    style={
+                      active
+                        ? {
+                            background: 'var(--surface)',
+                            color: 'var(--ink)',
+                            fontWeight: 600,
+                            boxShadow: 'var(--shadow-sm)',
+                          }
+                        : { color: 'var(--ink-secondary)' }
+                    }
+                  >
+                    <input
+                      type="radio"
+                      name="tier"
+                      value={tier}
+                      checked={active}
+                      onChange={() => void changeTier(tier)}
+                      className="sr-only"
+                    />
+                    {tier}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        </Card>
 
-        <ConsoleCard
-          title="Lifecycle"
-          subtitle="Suspension signs everyone out immediately and blocks new sign-ins"
-        >
+        <Card>
+          <CardHeader
+            title="Lifecycle"
+            subtitle="Suspension signs everyone out immediately and blocks new sign-ins"
+          />
           {pending ? (
             <div className="flex flex-col gap-3">
-              <p className="text-[0.875rem]" style={{ color: '#cbd5e1' }}>
+              <Alert tone={pending === 'active' ? 'info' : 'serious'}>
                 {pending === 'active'
                   ? 'Bring this hospital back online?'
                   : `Take ${tenant.display_name} offline? Every live session ends at once.`}
-              </p>
-              <div>
-                <label htmlFor="reason" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-                  Reason{pending === 'active' ? ' (optional)' : ''}
-                </label>
-                <input
-                  id="reason"
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                  placeholder="Non-payment: invoice 2026-0041 overdue 60 days"
-                  className="h-9 w-full rounded-[6px] px-3 text-[0.875rem]"
-                  style={{ background: '#0b1220', color: '#e2e8f0', border: '1px solid #334155' }}
-                />
-                <p className="mt-1 text-[0.75rem]" style={{ color: '#64748b' }}>
-                  Shown to whoever asks support why they are locked out, and recorded in this
-                  hospital’s own audit trail.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <ConsoleButton
+              </Alert>
+
+              <Field
+                name="reason"
+                label={`Reason${pending === 'active' ? ' (optional)' : ''}`}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="Non-payment: invoice 2026-0041 overdue 60 days"
+                hint="Shown to whoever asks support why they are locked out, and recorded in this hospital’s own audit trail."
+              />
+
+              <div className="flex flex-wrap gap-2">
+                <Button
                   variant={pending === 'active' ? 'primary' : 'danger'}
+                  loading={busy}
                   disabled={busy || (pending !== 'active' && reason.trim().length === 0)}
                   onClick={() => void changeStatus(pending)}
                 >
-                  {busy ? 'Working…' : pending === 'active' ? 'Restore' : `Confirm ${pending}`}
-                </ConsoleButton>
-                <ConsoleButton onClick={() => setPending(null)} disabled={busy}>
+                  {pending === 'active' ? 'Restore' : `Confirm ${pending}`}
+                </Button>
+                <Button variant="ghost" onClick={() => setPending(null)} disabled={busy}>
                   Cancel
-                </ConsoleButton>
+                </Button>
               </div>
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
               {tenant.status === 'active' ? (
                 <>
-                  <ConsoleButton variant="danger" onClick={() => setPending('suspended')}>
+                  <Button variant="danger" onClick={() => setPending('suspended')}>
                     Suspend
-                  </ConsoleButton>
-                  <ConsoleButton variant="danger" onClick={() => setPending('archived')}>
+                  </Button>
+                  <Button variant="secondary" onClick={() => setPending('archived')}>
                     Archive
-                  </ConsoleButton>
+                  </Button>
                 </>
               ) : tenant.status === 'archived' ? (
-                <p className="text-[0.875rem]" style={{ color: '#64748b' }}>
+                <p className="text-[0.875rem]" style={{ color: 'var(--ink-muted)' }}>
                   Archived. Restoring an archived hospital is a data-retention decision and is
                   not done from the console.
                 </p>
               ) : (
-                <ConsoleButton variant="primary" onClick={() => setPending('active')}>
+                <Button variant="primary" onClick={() => setPending('active')}>
                   Restore
-                </ConsoleButton>
+                </Button>
               )}
             </div>
           )}
-        </ConsoleCard>
+        </Card>
       </div>
 
       <div className="mt-5">
@@ -287,51 +345,61 @@ function TenantDetailView({ tenantId }: { tenantId: string }) {
       </div>
 
       <div className="mt-5">
-        <ConsoleCard
-          title="What the vendor has done here"
-          subtitle={
-            tenant.provisioned_by_email
-              ? `Provisioned by ${tenant.provisioned_by_email}`
-              : 'This hospital predates the console'
-          }
-          padded={false}
-        >
-          <div className="px-5 pb-4">
-            <ConsoleTable
-              head={
-                <>
-                  <ConsoleTh>When</ConsoleTh>
-                  <ConsoleTh>Action</ConsoleTh>
-                  <ConsoleTh>Operator</ConsoleTh>
-                  <ConsoleTh>Detail</ConsoleTh>
-                </>
-              }
-            >
+        <Card>
+          <CardHeader
+            title="What the vendor has done here"
+            subtitle={
+              tenant.provisioned_by_email
+                ? `Provisioned by ${tenant.provisioned_by_email}`
+                : 'This hospital predates the console'
+            }
+          />
+          <Table className="min-w-[48rem]">
+            <thead>
+              <tr>
+                <Th>When</Th>
+                <Th>Action</Th>
+                <Th>Operator</Th>
+                <Th>Detail</Th>
+              </tr>
+            </thead>
+            <tbody>
               {events.length === 0 ? (
                 <tr>
-                  <ConsoleTd muted>Nothing yet.</ConsoleTd>
+                  <Td colSpan={4}>
+                    <EmptyState
+                      title="Nothing yet"
+                      description="No vendor operator has acted on this hospital."
+                    />
+                  </Td>
                 </tr>
               ) : (
                 events.map((event) => (
-                  <tr key={event.id}>
-                    <ConsoleTd muted>{new Date(event.occurred_at).toLocaleString()}</ConsoleTd>
-                    <ConsoleTd>{event.action.replace(/^platform\./, '')}</ConsoleTd>
-                    <ConsoleTd muted>{event.actor_label}</ConsoleTd>
-                    <ConsoleTd muted>
+                  <Tr key={event.id}>
+                    <Td numeric style={{ color: 'var(--ink-secondary)' }}>
+                      {new Date(event.occurred_at).toLocaleString()}
+                    </Td>
+                    <Td>
+                      <span className="font-mono text-[0.8125rem]">
+                        {event.action.replace(/^platform\./, '')}
+                      </span>
+                    </Td>
+                    <Td style={{ color: 'var(--ink-secondary)' }}>{event.actor_label}</Td>
+                    <Td style={{ color: 'var(--ink-secondary)' }}>
                       {typeof event.metadata?.reason === 'string' ? event.metadata.reason : '—'}
-                    </ConsoleTd>
-                  </tr>
+                    </Td>
+                  </Tr>
                 ))
               )}
-            </ConsoleTable>
-          </div>
-        </ConsoleCard>
+            </tbody>
+          </Table>
+        </Card>
       </div>
 
-      <p className="mt-5 text-[0.8125rem]" style={{ color: '#475569' }}>
+      <p className="mt-5 text-[0.8125rem]" style={{ color: 'var(--ink-muted)' }}>
         Facilities, departments, staff and clinical configuration belong to this hospital and
         are managed from their own{' '}
-        <Link href="/settings" style={{ color: '#64748b', textDecoration: 'underline' }}>
+        <Link href="/settings" className="underline" style={{ color: 'var(--ink-secondary)' }}>
           settings screen
         </Link>
         , by their administrator.

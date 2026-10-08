@@ -17,13 +17,14 @@
 import { useEffect, useState } from 'react';
 import {
   ApiError,
+  openPlatformInvoicePdf,
   platformApi,
   type SubscriptionInvoiceRow,
 } from '@/lib/platform-api';
-
-import { openPlatformInvoicePdf } from '@/lib/platform-api';
 import { formatMoney } from '@/lib/format';
-import { ConsoleBadge, ConsoleButton } from './console-shell';
+import { Alert, Badge, Button } from '@/components/ui/primitives';
+import { Field, FormDialog, Select } from '@/components/ui/forms';
+import { StatusBadge } from './console-shell';
 
 const METHODS = [
   { value: 'bank_transfer', label: 'Bank transfer' },
@@ -33,12 +34,6 @@ const METHODS = [
   { value: 'cash', label: 'Cash' },
   { value: 'other', label: 'Other' },
 ];
-
-const field = (invalid = false) => ({
-  background: '#0b1220',
-  color: '#e2e8f0',
-  border: `1px solid ${invalid ? '#991b1b' : '#334155'}`,
-});
 
 export function RecordPaymentDialog({
   invoice,
@@ -56,9 +51,8 @@ export function RecordPaymentDialog({
   const [notes, setNotes] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [detail, setDetail] = useState<SubscriptionInvoiceRow | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
 
   // Re-seeded on open, and the full history is fetched so the operator can
   // see what has already been recorded before adding to it.
@@ -73,7 +67,7 @@ export function RecordPaymentDialog({
     setErrors({});
     setMessage(null);
     setDetail(null);
-    setCopied(null);
+    setLinkNotice(null);
 
     const controller = new AbortController();
     void (async () => {
@@ -95,11 +89,12 @@ export function RecordPaymentDialog({
   if (!invoice) return null;
 
   const balance = Number(invoice.balance_cents);
+
   const openPdf = async () => {
     try {
       await openPlatformInvoicePdf(invoice.id);
     } catch {
-      setCopied('Could not open the PDF');
+      setLinkNotice('Could not open the PDF.');
     }
   };
 
@@ -110,19 +105,16 @@ export function RecordPaymentDialog({
         `/billing/invoices/${invoice.id}/link`,
       );
       await navigator.clipboard?.writeText(data.url);
-      setCopied(`Copied — valid ${data.expiresInDays} days`);
+      setLinkNotice(`Link copied — valid ${data.expiresInDays} days.`);
     } catch {
-      setCopied('Could not copy');
+      setLinkNotice('Could not copy the link.');
     }
   };
+
   const parsed = Number(amount);
   const invalidAmount = !Number.isInteger(parsed) || parsed <= 0 || parsed > balance;
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (submitting) return;
-
-    setSubmitting(true);
+  const submit = async () => {
     setErrors({});
     setMessage(null);
 
@@ -143,8 +135,6 @@ export function RecordPaymentDialog({
       } else {
         setMessage('Something went wrong. Please try again.');
       }
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -160,230 +150,187 @@ export function RecordPaymentDialog({
       setDetail(data);
       onRecorded();
     } catch (caught) {
-      setMessage(caught instanceof ApiError ? caught.message : 'That payment could not be voided.');
+      setMessage(
+        caught instanceof ApiError ? caught.message : 'That payment could not be voided.',
+      );
     }
   };
 
   const recorded = detail?.payments ?? [];
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8"
-      style={{ background: 'rgba(2, 6, 23, 0.8)' }}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !submitting) onClose();
-      }}
+    <FormDialog
+      open={invoice !== null}
+      onClose={onClose}
+      className="console-root"
+      title="Record a payment"
+      description={`${invoice.invoice_number} · ${invoice.tenant_name}`}
+      submitLabel="Record payment"
+      onSubmit={submit}
+      message={message}
+      disabled={invalidAmount}
+      width="38rem"
     >
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Record a payment"
-        className="w-full max-w-[36rem] rounded-[10px]"
-        style={{ background: '#111827', border: '1px solid #1f2937' }}
+        className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-[var(--radius-md)] px-3.5 py-3 text-[0.8125rem]"
+        style={{ background: 'var(--surface-sunken)' }}
       >
-        <form onSubmit={submit}>
-          <div className="px-6 pt-5 pb-3">
-            <h2 className="text-[1.125rem] font-semibold" style={{ color: '#f1f5f9' }}>
-              Record a payment
-            </h2>
-            <p className="mt-1 text-[0.8125rem]" style={{ color: '#64748b' }}>
-              {invoice.invoice_number} · {invoice.tenant_name}
-            </p>
-
-            <div
-              className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-[8px] px-3 py-2 text-[0.8125rem]"
-              style={{ background: '#0b1220' }}
-            >
-              <span style={{ color: '#94a3b8' }}>
-                Total{' '}
-                <strong className="tabular-nums" style={{ color: '#e2e8f0' }}>
-                  {formatMoney(Number(invoice.total_cents), invoice.currency)}
-                </strong>
-              </span>
-              <span style={{ color: '#94a3b8' }}>
-                Paid{' '}
-                <strong className="tabular-nums" style={{ color: '#e2e8f0' }}>
-                  {formatMoney(Number(invoice.amount_paid_cents), invoice.currency)}
-                </strong>
-              </span>
-              <span style={{ color: '#94a3b8' }}>
-                Outstanding{' '}
-                <strong className="tabular-nums" style={{ color: '#fbbf24' }}>
-                  {formatMoney(balance, invoice.currency)}
-                </strong>
-              </span>
-              {invoice.is_overdue ? <ConsoleBadge value="overdue" /> : null}
-            </div>
-
-            {/*
-              The two things an operator reaches for when a hospital says they
-              never got the invoice: look at what was sent, and get a fresh
-              link to re-send. The emailed link expires after 90 days, so
-              re-minting it is a real need rather than a convenience.
-            */}
-            <div className="mt-2 flex flex-wrap gap-2">
-              <ConsoleButton onClick={() => void openPdf()}>Open the PDF</ConsoleButton>
-              <ConsoleButton onClick={() => void copyLink()}>
-                {copied ?? 'Copy the link we emailed'}
-              </ConsoleButton>
-            </div>
-          </div>
-
-          <div className="px-6 pb-3">
-            {message ? (
-              <div
-                className="mb-4 rounded-[8px] px-3 py-2.5 text-[0.8125rem]"
-                style={{ background: '#450a0a', color: '#fecaca' }}
-              >
-                {message}
-              </div>
-            ) : null}
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label htmlFor="amountCents" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-                  Amount ({invoice.currency})
-                </label>
-                <input
-                  id="amountCents"
-                  inputMode="numeric"
-                  value={amount}
-                  onChange={(event) => setAmount(event.target.value.replace(/[^0-9]/g, ''))}
-                  className="h-9 w-full rounded-[6px] px-3 text-[0.875rem] tabular-nums"
-                  style={field(invalidAmount || Boolean(errors.amountCents))}
-                />
-                <p
-                  className="mt-1 text-[0.75rem]"
-                  style={{ color: errors.amountCents || invalidAmount ? '#fca5a5' : '#64748b' }}
-                >
-                  {errors.amountCents ??
-                    (invalidAmount
-                      ? `Between 1 and ${balance}.`
-                      : `${formatMoney(parsed, invoice.currency)} — whole ${invoice.currency}, no decimal point`)}
-                </p>
-              </div>
-
-              <div>
-                <label htmlFor="method" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-                  How it arrived
-                </label>
-                <select
-                  id="method"
-                  value={method}
-                  onChange={(event) => setMethod(event.target.value)}
-                  className="h-9 w-full rounded-[6px] px-3 text-[0.875rem]"
-                  style={field()}
-                >
-                  {METHODS.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="reference" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-                  Reference
-                </label>
-                <input
-                  id="reference"
-                  value={reference}
-                  placeholder="CRDB-99812 or QGH7X2P1LM"
-                  onChange={(event) => setReference(event.target.value)}
-                  className="h-9 w-full rounded-[6px] px-3 text-[0.875rem]"
-                  style={field(Boolean(errors.reference))}
-                />
-                <p className="mt-1 text-[0.75rem]" style={{ color: '#64748b' }}>
-                  The transfer number or confirmation code. This is what reconciliation is done on.
-                </p>
-              </div>
-
-              <div>
-                <label htmlFor="receivedOn" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-                  Received on
-                </label>
-                <input
-                  id="receivedOn"
-                  type="date"
-                  value={receivedOn}
-                  onChange={(event) => setReceivedOn(event.target.value)}
-                  className="h-9 w-full rounded-[6px] px-3 text-[0.875rem]"
-                  style={field(Boolean(errors.receivedOn))}
-                />
-                <p className="mt-1 text-[0.75rem]" style={{ color: '#64748b' }}>
-                  When the money landed, not when you are typing this.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <label htmlFor="notes" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-                Notes
-              </label>
-              <input
-                id="notes"
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                className="h-9 w-full rounded-[6px] px-3 text-[0.875rem]"
-                style={field()}
-              />
-            </div>
-
-            {recorded.length > 0 ? (
-              <div className="mt-5">
-                <p className="mb-2 text-[0.75rem] tracking-[0.03em] uppercase" style={{ color: '#64748b' }}>
-                  Already recorded
-                </p>
-                <ul className="flex flex-col gap-1.5">
-                  {recorded.map((payment) => (
-                    <li
-                      key={payment.id}
-                      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[6px] px-3 py-2 text-[0.8125rem]"
-                      style={{
-                        background: '#0b1220',
-                        color: payment.voided_at ? '#64748b' : '#cbd5e1',
-                        textDecoration: payment.voided_at ? 'line-through' : undefined,
-                      }}
-                    >
-                      <span className="tabular-nums">
-                        {formatMoney(Number(payment.amount_cents), payment.currency)}
-                      </span>
-                      <span>{payment.received_on.slice(0, 10)}</span>
-                      <span>{payment.method.replace(/_/g, ' ')}</span>
-                      {payment.reference ? <span>· {payment.reference}</span> : null}
-                      {payment.voided_at ? (
-                        <span style={{ textDecoration: 'none' }}>— voided: {payment.void_reason}</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="ml-auto underline"
-                          style={{ color: '#f87171' }}
-                          onClick={() => void voidPayment(payment.id)}
-                        >
-                          Void
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
-
-          <div
-            className="flex items-center justify-end gap-2 px-6 py-4"
-            style={{ borderTop: '1px solid #1f2937' }}
-          >
-            <ConsoleButton onClick={onClose} disabled={submitting}>
-              Cancel
-            </ConsoleButton>
-            <ConsoleButton type="submit" variant="primary" disabled={invalidAmount || submitting}>
-              {submitting ? 'Recording…' : 'Record payment'}
-            </ConsoleButton>
-          </div>
-        </form>
+        <Money label="Total" value={Number(invoice.total_cents)} currency={invoice.currency} />
+        <Money label="Paid" value={Number(invoice.amount_paid_cents)} currency={invoice.currency} />
+        <Money label="Outstanding" value={balance} currency={invoice.currency} emphasis />
+        <span className="ml-auto flex items-center gap-1.5">
+          <StatusBadge value={invoice.status} />
+          {invoice.is_overdue ? <Badge tone="warning">{invoice.days_overdue}d late</Badge> : null}
+        </span>
       </div>
-    </div>
+
+      {/*
+        The two things an operator reaches for when a hospital says they
+        never got the invoice: look at what was sent, and get a fresh link
+        to re-send. The emailed link expires after 90 days, so re-minting it
+        is a real need rather than a convenience.
+      */}
+      <div className="-mt-2 flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" variant="secondary" onClick={() => void openPdf()}>
+          Open the PDF
+        </Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => void copyLink()}>
+          Copy the link we emailed
+        </Button>
+        {linkNotice ? (
+          <span role="status" className="text-[0.75rem]" style={{ color: 'var(--ink-muted)' }}>
+            {linkNotice}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          name="amountCents"
+          label={`Amount (${invoice.currency})`}
+          inputMode="numeric"
+          value={amount}
+          onChange={(event) => setAmount(event.target.value.replace(/[^0-9]/g, ''))}
+          error={errors.amountCents ?? (invalidAmount ? `Between 1 and ${balance}.` : undefined)}
+          hint={`${formatMoney(parsed || 0, invoice.currency)} — whole ${invoice.currency}, no decimal point`}
+        />
+
+        <Select
+          name="method"
+          label="How it arrived"
+          value={method}
+          options={METHODS}
+          onChange={(event) => setMethod(event.target.value)}
+        />
+
+        <Field
+          name="reference"
+          label="Reference"
+          value={reference}
+          placeholder="CRDB-99812 or QGH7X2P1LM"
+          onChange={(event) => setReference(event.target.value)}
+          error={errors.reference}
+          hint="The transfer number or confirmation code. This is what reconciliation is done on."
+        />
+
+        <Field
+          name="receivedOn"
+          label="Received on"
+          type="date"
+          value={receivedOn}
+          onChange={(event) => setReceivedOn(event.target.value)}
+          error={errors.receivedOn}
+          hint="When the money landed, not when you are typing this."
+        />
+      </div>
+
+      <Field
+        name="notes"
+        label="Notes"
+        value={notes}
+        onChange={(event) => setNotes(event.target.value)}
+      />
+
+      {recorded.length > 0 ? (
+        <div>
+          <p
+            className="mb-2 text-[0.75rem] font-medium tracking-[0.02em] uppercase"
+            style={{ color: 'var(--ink-muted)' }}
+          >
+            Already recorded
+          </p>
+          <ul className="flex flex-col gap-1.5">
+            {recorded.map((payment) => (
+              <li
+                key={payment.id}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[var(--radius-sm)] px-3 py-2 text-[0.8125rem]"
+                style={{
+                  background: 'var(--surface-sunken)',
+                  color: payment.voided_at ? 'var(--ink-muted)' : 'var(--ink-secondary)',
+                }}
+              >
+                <span
+                  className="tabular font-medium"
+                  style={{
+                    textDecoration: payment.voided_at ? 'line-through' : undefined,
+                    color: payment.voided_at ? 'var(--ink-muted)' : 'var(--ink)',
+                  }}
+                >
+                  {formatMoney(Number(payment.amount_cents), payment.currency)}
+                </span>
+                <span className="tabular">{payment.received_on.slice(0, 10)}</span>
+                <span className="capitalize">{payment.method.replace(/_/g, ' ')}</span>
+                {payment.reference ? <span className="font-mono">{payment.reference}</span> : null}
+                {payment.voided_at ? (
+                  <Badge tone="neutral" dot>
+                    voided: {payment.void_reason}
+                  </Badge>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="ml-auto"
+                    onClick={() => void voidPayment(payment.id)}
+                  >
+                    Void
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {balance === 0 ? (
+        <Alert tone="info">
+          This invoice has no outstanding balance. There is nothing left to record against it.
+        </Alert>
+      ) : null}
+    </FormDialog>
+  );
+}
+
+function Money({
+  label,
+  value,
+  currency,
+  emphasis,
+}: {
+  label: string;
+  value: number;
+  currency: string;
+  emphasis?: boolean;
+}) {
+  return (
+    <span style={{ color: 'var(--ink-muted)' }}>
+      {label}{' '}
+      <strong
+        className="tabular"
+        style={{ color: emphasis && value > 0 ? 'var(--warning-ink)' : 'var(--ink)' }}
+      >
+        {formatMoney(value, currency)}
+      </strong>
+    </span>
   );
 }
