@@ -27,7 +27,12 @@ import { withoutTenantIsolation } from '../../db/pool.js';
 import { validate, param } from '../../middleware/validate.js';
 import { AppError } from '../../utils/errors.js';
 import { verifyInvoiceDownload } from '../../security/download-tokens.js';
-import { renderInvoicePdf, type InvoiceDocument } from '../platform/invoice-pdf.js';
+import {
+  CUSTOMER_INVOICE_PAYMENTS_SQL,
+  renderInvoicePdf,
+  type InvoiceDocument,
+  type InvoicePayment,
+} from '../platform/invoice-pdf.js';
 import { logger } from '../../utils/logger.js';
 
 export const subscriptionDocumentRoutes = Router();
@@ -72,7 +77,15 @@ subscriptionDocumentRoutes.get(
             [invoiceId],
           );
 
-          return rows[0] ?? null;
+          const row = rows[0];
+          if (!row) return null;
+
+          const { rows: payments } = await db.query<InvoicePayment>(
+            CUSTOMER_INVOICE_PAYMENTS_SQL,
+            [invoiceId],
+          );
+
+          return { ...row, payments };
         },
       );
 

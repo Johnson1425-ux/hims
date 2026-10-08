@@ -22,7 +22,7 @@ import {
   type SubscriptionInvoiceRow,
 } from '@/lib/platform-api';
 import { formatMoney } from '@/lib/format';
-import { Alert, Badge, Button } from '@/components/ui/primitives';
+import { Alert, Badge, Button, Table, Td, Th, Tr } from '@/components/ui/primitives';
 import { Field, FormDialog, Select } from '@/components/ui/forms';
 import { StatusBadge } from './console-shell';
 
@@ -34,6 +34,19 @@ const METHODS = [
   { value: 'cash', label: 'Cash' },
   { value: 'other', label: 'Other' },
 ];
+
+/**
+ * The same labels the picker offers, reused in the history.
+ *
+ * A CSS `capitalize` on the raw column value gave "Bank Transfer" — title
+ * case in a product that is sentence case everywhere else, including on the
+ * PDF of the very same payment.
+ */
+const METHOD_LABELS = new Map(METHODS.map((m) => [m.value, m.label]));
+
+function methodLabel(method: string): string {
+  return METHOD_LABELS.get(method) ?? method.replace(/_/g, ' ');
+}
 
 export function RecordPaymentDialog({
   invoice,
@@ -169,7 +182,7 @@ export function RecordPaymentDialog({
       onSubmit={submit}
       message={message}
       disabled={invalidAmount}
-      width="38rem"
+      width="40rem"
     >
       <div
         className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-[var(--radius-md)] px-3.5 py-3 text-[0.8125rem]"
@@ -251,54 +264,107 @@ export function RecordPaymentDialog({
         onChange={(event) => setNotes(event.target.value)}
       />
 
+      {/*
+        A table, not a row of chips. These are ledger entries — four fields
+        that line up column to column across rows, and an amount a reader
+        adds up by eye against the invoice total. Chips put the same four
+        values at a different horizontal position on every line, which is
+        precisely the job a table exists to do.
+      */}
       {recorded.length > 0 ? (
         <div>
           <p
-            className="mb-2 text-[0.75rem] font-medium tracking-[0.02em] uppercase"
+            className="mb-1 text-[0.75rem] font-medium tracking-[0.02em] uppercase"
             style={{ color: 'var(--ink-muted)' }}
           >
-            Already recorded
+            Payment history
           </p>
-          <ul className="flex flex-col gap-1.5">
-            {recorded.map((payment) => (
-              <li
-                key={payment.id}
-                className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[var(--radius-sm)] px-3 py-2 text-[0.8125rem]"
-                style={{
-                  background: 'var(--surface-sunken)',
-                  color: payment.voided_at ? 'var(--ink-muted)' : 'var(--ink-secondary)',
-                }}
-              >
-                <span
-                  className="tabular font-medium"
-                  style={{
-                    textDecoration: payment.voided_at ? 'line-through' : undefined,
-                    color: payment.voided_at ? 'var(--ink-muted)' : 'var(--ink)',
-                  }}
-                >
-                  {formatMoney(Number(payment.amount_cents), payment.currency)}
-                </span>
-                <span className="tabular">{payment.received_on.slice(0, 10)}</span>
-                <span className="capitalize">{payment.method.replace(/_/g, ' ')}</span>
-                {payment.reference ? <span className="font-mono">{payment.reference}</span> : null}
-                {payment.voided_at ? (
-                  <Badge tone="neutral" dot>
-                    voided: {payment.void_reason}
-                  </Badge>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="ml-auto"
-                    onClick={() => void voidPayment(payment.id)}
-                  >
-                    Void
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <Table className="min-w-[31rem]">
+            <thead>
+              <tr>
+                <Th>Received</Th>
+                <Th>Method</Th>
+                <Th>Reference</Th>
+                <Th align="right">Amount</Th>
+                <Th align="right" width="5rem" />
+              </tr>
+            </thead>
+            <tbody>
+              {recorded.map((payment) => {
+                const voided = Boolean(payment.voided_at);
+
+                return (
+                  <Tr key={payment.id}>
+                    {/* The date and the method never wrap: left to fight the
+                        void reason for width, "2026-10-07" broke across two
+                        lines. The reference column absorbs the squeeze. */}
+                    <Td
+                      numeric
+                      className="whitespace-nowrap"
+                      style={{ color: 'var(--ink-secondary)' }}
+                    >
+                      {payment.received_on.slice(0, 10)}
+                    </Td>
+                    <Td className="whitespace-nowrap" style={{ color: 'var(--ink-secondary)' }}>
+                      {methodLabel(payment.method)}
+                    </Td>
+                    <Td>
+                      {payment.reference ? (
+                        <span className="font-mono text-[0.8125rem]">{payment.reference}</span>
+                      ) : (
+                        <span style={{ color: 'var(--ink-muted)' }}>—</span>
+                      )}
+                      {voided ? (
+                        <div className="mt-0.5 text-[0.75rem]" style={{ color: 'var(--ink-muted)' }}>
+                          voided{payment.void_reason ? ` — ${payment.void_reason}` : ''}
+                        </div>
+                      ) : null}
+                    </Td>
+                    <Td
+                      align="right"
+                      numeric
+                      className="whitespace-nowrap"
+                      style={{
+                        color: voided ? 'var(--ink-muted)' : 'var(--ink)',
+                        textDecoration: voided ? 'line-through' : undefined,
+                        fontWeight: voided ? undefined : 500,
+                      }}
+                    >
+                      {formatMoney(Number(payment.amount_cents), payment.currency)}
+                    </Td>
+                    <Td align="right">
+                      {voided ? (
+                        <Badge tone="neutral" dot>
+                          voided
+                        </Badge>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void voidPayment(payment.id)}
+                        >
+                          Void
+                        </Button>
+                      )}
+                    </Td>
+                  </Tr>
+                );
+              })}
+
+              {/* The figure the operator is about to add to, so it is the
+                  one the table has to end on. */}
+              <tr>
+                <Td colSpan={3} align="right" style={{ color: 'var(--ink-muted)' }}>
+                  Applied to this invoice
+                </Td>
+                <Td align="right" numeric className="font-semibold">
+                  {formatMoney(Number(invoice.amount_paid_cents), invoice.currency)}
+                </Td>
+                <Td />
+              </tr>
+            </tbody>
+          </Table>
         </div>
       ) : null}
 
