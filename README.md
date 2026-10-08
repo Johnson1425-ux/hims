@@ -524,7 +524,19 @@ the path. The port decides the encryption: 465 is implicit TLS, anything else
 is STARTTLS, which is **required** rather than attempted. `MAIL_FROM` has to
 be an address your provider has authorised, or everything comes back 5xx.
 
-A 5xx is treated as final: the notification is failed rather than retried,
+Gmail works for development: `smtp.gmail.com:587`, your full address as
+`SMTP_USER`, and a 16-character **App Password** as `SMTP_PASSWORD` (account
+passwords are no longer accepted; App Passwords require 2-Step Verification).
+`MAIL_FROM` must be that same address or a verified alias — Gmail rewrites
+anything else, so the invoice arrives from your personal account rather than
+the hospital's. It is not a transactional relay: no DKIM for your domain, and
+a daily cap of roughly 500.
+
+Not every 5xx is final: Gmail answers an exhausted quota with `550 5.4.5`,
+which clears in about a day. That class is **deferred** — requeued a couple
+of hours out without spending an attempt, because retrying hard against a
+quota is what extends the lockout. Every other 5xx is treated as final: the
+notification is failed rather than retried,
 because a mailbox that does not exist will not start existing on the fourth
 attempt, and repeatedly mailing addresses that bounce is how a sending domain
 loses its reputation. Everything else backs off exponentially up to
