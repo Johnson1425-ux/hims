@@ -17,6 +17,7 @@ import { withoutTenantIsolation } from '../../db/pool.js';
 import { AppError } from '../../utils/errors.js';
 import type { PlatformPrincipal } from '../../middleware/authenticate-platform.js';
 import { recordPlatformAction, type RequestMeta } from './service.js';
+import { CUSTOMER_INVOICE_PAYMENTS_SQL } from './invoice-pdf.js';
 import { invoiceDownloadUrl } from '../../security/download-tokens.js';
 import { logger } from '../../utils/logger.js';
 
@@ -748,6 +749,36 @@ export async function getInvoice(invoiceId: string): Promise<Record<string, unkn
   return withoutTenantIsolation('platform console: reading a subscription invoice', (db) =>
     loadInvoice(db, invoiceId),
   );
+}
+
+/**
+ * The same invoice, loaded for RENDERING rather than for the console.
+ *
+ * Separate from `getInvoice` so the operator's copy of the PDF is identical
+ * to the hospital's. `loadInvoice` lists payments newest first, which is
+ * right for "what just happened" in the console, and selects the operator
+ * who keyed each one in. Rendering that would produce a document whose rows
+ * ran backwards compared to the one the customer downloaded, and which
+ * carried a vendor employee's email — from the same invoice.
+ */
+export async function getInvoiceDocument(
+  invoiceId: string,
+): Promise<Record<string, unknown> | null> {
+  return withoutTenantIsolation('platform console: rendering a subscription invoice', async (db) => {
+    const { rows } = await db.query(
+      `SELECT i.*, t.display_name AS tenant_name, t.slug AS tenant_slug
+         FROM v_subscription_invoice_status i
+         JOIN tenants t ON t.id = i.tenant_id
+        WHERE i.id = $1`,
+      [invoiceId],
+    );
+
+    const invoice = rows[0];
+    if (!invoice) return null;
+
+    const { rows: payments } = await db.query(CUSTOMER_INVOICE_PAYMENTS_SQL, [invoiceId]);
+    return { ...invoice, payments };
+  });
 }
 
 /**

@@ -24,7 +24,12 @@ import type { NextFunction, Request, Response } from 'express';
 import { requirePermission } from '../../middleware/authorize.js';
 import { param, validate } from '../../middleware/validate.js';
 import { runInTenantReadOnly } from '../../middleware/tenant.js';
-import { renderInvoicePdf, type InvoiceDocument } from '../platform/invoice-pdf.js';
+import {
+  CUSTOMER_INVOICE_PAYMENTS_SQL,
+  renderInvoicePdf,
+  type InvoiceDocument,
+  type InvoicePayment,
+} from '../platform/invoice-pdf.js';
 import { NotFoundError } from '../../utils/errors.js';
 
 export const subscriptionRoutes = Router();
@@ -138,7 +143,17 @@ subscriptionRoutes.get(
           [invoiceId],
         );
 
-        return rows[0] ?? null;
+        const row = rows[0];
+        if (!row) return null;
+
+        // Same transaction, same policy: a payment belonging to another
+        // hospital is filtered out by RLS exactly as the invoice would be.
+        const { rows: payments } = await db.query<InvoicePayment>(
+          CUSTOMER_INVOICE_PAYMENTS_SQL,
+          [invoiceId],
+        );
+
+        return { ...row, payments };
       });
 
       // Another hospital's invoice is invisible rather than forbidden: the

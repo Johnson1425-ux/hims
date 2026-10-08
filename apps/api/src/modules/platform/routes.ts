@@ -378,7 +378,9 @@ platformRoutes.get(
   validate({ params: invoiceParams }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const invoice = (await billing.getInvoice(param(req, 'invoiceId'))) as
+      // `getInvoiceDocument`, not `getInvoice`: an operator re-sending this
+      // must be looking at the same file the hospital has.
+      const invoice = (await billing.getInvoiceDocument(param(req, 'invoiceId'))) as
         | (InvoiceDocument & { invoice_number: string })
         | null;
 
