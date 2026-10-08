@@ -119,10 +119,24 @@ const schema = z.object({
 
   MAIL_PROVIDER: z.enum(['smtp', 'ses', '']).default(''),
   MAIL_FROM: z.string().default('no-reply@hims.local'),
+  /**
+   * Where a reply goes. Several messages end "reply to this message and we
+   * will look into it", so without one the From address has to be a mailbox
+   * somebody reads.
+   */
+  MAIL_REPLY_TO: z.string().optional(),
   SMTP_HOST: z.string().optional(),
+  /** 465 is implicit TLS; anything else is STARTTLS. Nothing else to set. */
   SMTP_PORT: z.coerce.number().int().optional(),
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
+  /**
+   * Drops the TLS requirement. For a local capture sink (MailHog, Mailpit,
+   * maildev) and nothing else — these messages carry invoices, names and
+   * password-setting links, so the production path requires STARTTLS and
+   * `loadEnv` refuses this flag outside development.
+   */
+  SMTP_INSECURE: booleanish().default(false),
 
   SMS_PROVIDER: z.enum(['twilio', 'africastalking', '']).default(''),
   SMS_FROM: z.string().optional(),
@@ -218,6 +232,27 @@ if (env.NODE_ENV === 'production') {
   if (env.CORS_ORIGINS.includes('*')) {
     configErrors.push('CORS_ORIGINS must not be a wildcard in production.');
   }
+  // SMTP_INSECURE exists for a local capture sink. In production it would
+  // put invitation links and invoices on the wire in the clear.
+  if (env.SMTP_INSECURE) {
+    configErrors.push(
+      'SMTP_INSECURE must not be set in production: it disables STARTTLS, and these ' +
+        'messages carry invoices and password-setting links.',
+    );
+  }
+}
+
+// Set the provider and forget the host and the whole thing fails one message
+// at a time, hours later, in a column nobody reads.
+if (env.MAIL_PROVIDER === 'smtp' && !env.SMTP_HOST) {
+  configErrors.push('MAIL_PROVIDER is "smtp" but SMTP_HOST is not set.');
+}
+
+if (env.MAIL_PROVIDER === 'ses') {
+  configErrors.push(
+    'MAIL_PROVIDER "ses" is not implemented. Use "smtp" with the SES SMTP endpoint ' +
+      '(email-smtp.<region>.amazonaws.com) and SMTP credentials from the SES console.',
+  );
 }
 
 if (configErrors.length > 0) {
