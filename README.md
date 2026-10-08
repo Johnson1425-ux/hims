@@ -494,7 +494,45 @@ pnpm db:seed             # two hospitals of demo data
 
 pnpm --filter @hims/api worker:notifications   # outbox drain
 pnpm --filter @hims/api worker:scheduler       # maintenance tasks
+pnpm --filter @hims/api mail:sink              # local SMTP server, prints what was sent
 ```
+
+### Email
+
+Notifications are written to the `notifications` outbox in the same
+transaction as the change that caused them, and the worker drains it. With
+`MAIL_PROVIDER` empty — the default — email is rendered and logged but not
+sent, which is what you want on a laptop.
+
+To see the real send path without mailing anyone, run the sink in one
+terminal and point `.env` at it:
+
+```
+pnpm --filter @hims/api mail:sink              # or -- --reject to refuse everything
+```
+```
+MAIL_PROVIDER=smtp
+SMTP_HOST=127.0.0.1
+SMTP_PORT=2525
+SMTP_INSECURE=true
+```
+
+For a real relay, set `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASSWORD` and
+drop `SMTP_INSECURE`. Any SMTP provider works — SES, Mailgun, Postmark,
+Resend, a hospital's own Exchange relay — because there is no vendor SDK in
+the path. The port decides the encryption: 465 is implicit TLS, anything else
+is STARTTLS, which is **required** rather than attempted. `MAIL_FROM` has to
+be an address your provider has authorised, or everything comes back 5xx.
+
+A 5xx is treated as final: the notification is failed rather than retried,
+because a mailbox that does not exist will not start existing on the fourth
+attempt, and repeatedly mailing addresses that bounce is how a sending domain
+loses its reputation. Everything else backs off exponentially up to
+`max_attempts`.
+
+The transport is verified once at worker startup, so a wrong host or a
+rejected password is one loud line in the log rather than a thousand
+identical failures discovered days later.
 
 ---
 
@@ -503,7 +541,7 @@ pnpm --filter @hims/api worker:scheduler       # maintenance tasks
 ```
 apps/
   api/
-    migrations/      13 ordered SQL migrations; the authoritative schema
+    migrations/      21 ordered SQL migrations; the authoritative schema
     seeds/           verify_invariants.sql — 34 behavioural checks
     src/
       config/        environment validation; exits on unsafe configuration

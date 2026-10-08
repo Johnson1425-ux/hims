@@ -20,6 +20,13 @@ import { withoutTenantIsolation, type Queryable } from '../db/pool.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { createFieldCipher } from '../security/crypto.js';
+import {
+  closeMailTransport,
+  isPermanentDeliveryError,
+  mailConfigured,
+  sendEmail,
+  verifyMailTransport,
+} from '../notifications/mailer.js';
 
 const BATCH_SIZE = 50;
 
@@ -167,9 +174,17 @@ async function deliver(
   destination: string,
   content: { subject: string | null; body: string },
 ): Promise<{ providerMessageId: string; provider: string }> {
-  if (channel === 'email' && env.MAIL_PROVIDER === 'smtp') {
-    // INTEGRATION POINT: nodemailer / SES send goes here.
-    throw new Error('SMTP transport is configured but not yet wired');
+  if (channel === 'email' && mailConfigured()) {
+    const messageId = await sendEmail({
+      to: destination,
+      // A subject is required by the templates that have one; the few that do
+      // not are in-app rows, which never reach here. The fallback exists so a
+      // misconfigured template cannot produce a blank-subject email.
+      subject: content.subject ?? 'A message from your hospital system',
+      text: content.body,
+    });
+
+    return { providerMessageId: messageId, provider: 'smtp' };
   }
 
   if (channel === 'sms' && env.SMS_PROVIDER === 'twilio') {
@@ -318,7 +333,14 @@ async function processBatch(): Promise<{ sent: number; failed: number; materiali
           sent += 1;
         } catch (error) {
           const attempts = row.attempts + 1;
-          const exhausted = attempts >= row.max_attempts;
+
+          // A 5xx from the receiving server is a verdict, not a hiccup: the
+          // mailbox does not exist or the message was rejected outright.
+          // Retrying it three more times on a backoff achieves nothing and
+          // tells the receiving side this sender keeps mailing addresses
+          // that bounce.
+          const permanent = isPermanentDeliveryError(error);
+          const exhausted = permanent || attempts >= row.max_attempts;
 
           // Exponential backoff: 1, 2, 4, 8 minutes...
           const backoffMinutes = Math.min(2 ** attempts, 60);
@@ -352,8 +374,10 @@ async function processBatch(): Promise<{ sent: number; failed: number; materiali
 
           failed += 1;
           logger.warn(
-            { notificationId: row.id, channel: row.channel, attempts, exhausted },
-            'notification delivery failed',
+            { notificationId: row.id, channel: row.channel, attempts, exhausted, permanent },
+            permanent
+              ? 'notification refused permanently; not retrying'
+              : 'notification delivery failed',
           );
         }
       }
@@ -366,6 +390,11 @@ async function processBatch(): Promise<{ sent: number; failed: number; materiali
 let running = true;
 
 async function loop(): Promise<void> {
+  // Before the first batch, so a wrong host or a rejected password is one
+  // loud line at startup rather than a thousand identical failures found
+  // days later.
+  await verifyMailTransport();
+
   logger.info(
     { intervalSeconds: env.REMINDER_SCAN_INTERVAL_SECONDS, batchSize: BATCH_SIZE },
     'notification worker started',
@@ -391,6 +420,8 @@ async function loop(): Promise<void> {
 process.on('SIGTERM', () => {
   logger.info('notification worker stopping');
   running = false;
+  // The pooled SMTP connections hold the event loop open otherwise.
+  closeMailTransport();
 });
 
 void loop();
