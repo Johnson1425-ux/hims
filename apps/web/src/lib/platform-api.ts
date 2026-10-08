@@ -214,11 +214,19 @@ export interface TenantRow {
   last_activity_at: string | null;
 }
 
+/** A hospital administrator the vendor writes to about money. */
+export interface BillingContact {
+  id: string;
+  full_name: string;
+  email: string;
+}
+
 export interface TenantDetail extends TenantRow {
   provisioned_by_email: string | null;
   invited_user_count: string;
   department_count: string;
   unreviewed_break_glass: string;
+  billing_contacts: BillingContact[];
 }
 
 export interface PlatformSummary {

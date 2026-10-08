@@ -23,6 +23,7 @@ import {
 import { SubscriptionPanel } from '@/components/platform/subscription-panel';
 import {
   Alert,
+  Avatar,
   Button,
   Card,
   CardHeader,
@@ -341,6 +342,10 @@ function TenantDetailView({ tenantId }: { tenantId: string }) {
       </div>
 
       <div className="mt-5">
+        <BillingContacts tenant={tenant} />
+      </div>
+
+      <div className="mt-5">
         <SubscriptionPanel tenantId={tenantId} />
       </div>
 
@@ -405,5 +410,84 @@ function TenantDetailView({ tenantId }: { tenantId: string }) {
         , by their administrator.
       </p>
     </>
+  );
+}
+
+
+/* ===========================================================================
+ * Billing contacts
+ *
+ * The people this hospital's invoices and payment receipts are addressed to,
+ * and therefore the people an operator chasing an overdue invoice should
+ * write to. Until this existed the only email on the page was the vendor
+ * operator who provisioned the hospital, and finding a customer contact
+ * meant opening the database.
+ *
+ * The list is EXACTLY the set the notifications go to — holders of
+ * `tenant:settings`. Showing anyone else would make this a staff directory,
+ * which is not the vendor's to browse.
+ * ======================================================================== */
+
+function BillingContacts({ tenant }: { tenant: TenantDetail }) {
+  const contacts = tenant.billing_contacts ?? [];
+  const addresses = contacts.map((c) => c.email).join(', ');
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <Card>
+      <CardHeader
+        title="Billing contacts"
+        subtitle="Everyone here receives this hospital's invoices and payment receipts"
+        action={
+          contacts.length > 0 ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                void navigator.clipboard?.writeText(addresses);
+                setCopied(true);
+              }}
+            >
+              {copied ? 'Copied' : `Copy ${contacts.length === 1 ? 'address' : 'all addresses'}`}
+            </Button>
+          ) : null
+        }
+      />
+
+      {contacts.length === 0 ? (
+        /*
+         * Not an empty state — a fault. This hospital is being invoiced and
+         * nobody is being told, which used to show up only as a warning in
+         * the worker's log.
+         */
+        <Alert tone="warning" title="Nobody here can be invoiced">
+          No active user at this hospital holds <code>tenant:settings</code>, so its invoices
+          and payment receipts are queued for nobody. Ask them to give an administrator that
+          permission before the next billing run.
+        </Alert>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {contacts.map((contact) => (
+            <li
+              key={contact.id}
+              className="flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] px-3 py-2"
+              style={{ background: 'var(--surface-sunken)' }}
+            >
+              <Avatar name={contact.full_name} size={28} />
+              <span className="text-[0.875rem] font-medium" style={{ color: 'var(--ink)' }}>
+                {contact.full_name}
+              </span>
+              <a
+                href={`mailto:${contact.email}`}
+                className="text-[0.8125rem] hover:underline"
+                style={{ color: 'var(--accent)' }}
+              >
+                {contact.email}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
