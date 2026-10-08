@@ -557,7 +557,11 @@ export async function changePassword(
         ]);
       }
 
-      assertPasswordPolicy(newPassword, { email: user.email, fullName: user.full_name });
+      assertPasswordPolicy(newPassword, {
+        email: user.email,
+        fullName: user.full_name,
+        field: 'newPassword',
+      });
 
       await db.query(
         `UPDATE users
@@ -699,6 +703,7 @@ export async function completePasswordReset(token: string, newPassword: string):
       assertPasswordPolicy(newPassword, {
         email: userRows[0]?.email,
         fullName: userRows[0]?.full_name,
+        field: 'newPassword',
       });
 
       // Single-use: consume before changing anything, so a replayed request
