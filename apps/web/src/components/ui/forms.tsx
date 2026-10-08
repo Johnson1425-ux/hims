@@ -56,11 +56,24 @@ export function useFormErrors() {
    * Field-level issues are attached to their fields; anything without a field
    * — a conflict, a business rule — becomes the form-level message, because a
    * message with nowhere to attach must not disappear.
+   *
+   * `rendered` IS THE GUARD AGAINST A SILENT FORM. Suppressing the message
+   * assumes the field errors will be seen, and an issue naming a field this
+   * form does not render is seen nowhere at all: the user presses the button
+   * and watches nothing happen. That shipped — the API reported password
+   * policy failures against `password` while the form rendered
+   * `newPassword`. Pass the names a form actually renders and any issue
+   * outside that set keeps the message visible instead.
    */
-  const capture = useCallback((error: unknown) => {
+  const capture = useCallback((error: unknown, rendered?: readonly string[]) => {
     if (error instanceof ApiError) {
       setErrors(error.fieldErrors);
-      setMessage(error.issues.length > 0 && Object.keys(error.fieldErrors).length > 0 ? null : error.message);
+
+      const fields = Object.keys(error.fieldErrors);
+      const allShown =
+        fields.length > 0 && (rendered === undefined || fields.every((f) => rendered.includes(f)));
+
+      setMessage(error.issues.length > 0 && allShown ? null : error.message);
       return;
     }
     setErrors({});

@@ -125,14 +125,27 @@ export function checkPasswordPolicy(
   return { ok: issues.length === 0, issues, score };
 }
 
+/**
+ * `field` NAMES THE REQUEST BODY FIELD THE PASSWORD ARRIVED IN, and it is not
+ * decoration. The browser attaches a field issue to the input of the same
+ * name; an issue naming a field the form does not render attaches to nothing
+ * and is shown nowhere, so the user presses the button and watches nothing
+ * happen.
+ *
+ * That is exactly what this did. Two of the three callers take the password
+ * as `newPassword` — change-password and password-reset/complete, which is
+ * also how an invitation is accepted — and both reported every policy
+ * failure against `password`. "Do not include your name in your password"
+ * was computed, returned, and silently dropped.
+ */
 export function assertPasswordPolicy(
   password: string,
-  context: { email?: string; fullName?: string } = {},
+  context: { email?: string; fullName?: string; field?: string } = {},
 ): void {
   const result = checkPasswordPolicy(password, context);
   if (!result.ok) {
     throw new ValidationError(
-      result.issues.map((message) => ({ field: 'password', message })),
+      result.issues.map((message) => ({ field: context.field ?? 'password', message })),
       'That password does not meet the security policy.',
     );
   }

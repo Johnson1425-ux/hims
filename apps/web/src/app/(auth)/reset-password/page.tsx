@@ -42,7 +42,7 @@ function ResetForm() {
       setDone(true);
       window.setTimeout(() => router.push('/login'), 2500);
     } catch (caught) {
-      form.capture(caught);
+      form.capture(caught, ['newPassword', 'confirmPassword']);
     } finally {
       setSubmitting(false);
     }

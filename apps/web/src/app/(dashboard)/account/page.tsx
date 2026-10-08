@@ -53,7 +53,7 @@ export default function AccountPage() {
         text: 'Password changed. Every other session you had open has been signed out.',
       });
     } catch (caught) {
-      form.capture(caught);
+      form.capture(caught, ['currentPassword', 'newPassword', 'confirmPassword']);
     }
   }, [current, next, confirm, form]);
 
