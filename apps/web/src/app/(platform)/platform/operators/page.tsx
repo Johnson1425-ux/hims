@@ -13,14 +13,21 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiError, platformApi, type OperatorRow } from '@/lib/platform-api';
 import { usePlatformSession } from '@/lib/platform-session';
 import {
-  ConsoleBadge,
-  ConsoleButton,
-  ConsoleCard,
-  ConsoleShell,
-  ConsoleTable,
-  ConsoleTd,
-  ConsoleTh,
-} from '@/components/platform/console-shell';
+  Alert,
+  Avatar,
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  Skeleton,
+  Table,
+  Td,
+  Th,
+  Tr,
+} from '@/components/ui/primitives';
+import { Checkbox, Field, FormDialog } from '@/components/ui/forms';
+import { ConsoleShell, PageHeader, StatusBadge } from '@/components/platform/console-shell';
+import { IconPlus } from '@/components/layout/icons';
 
 export default function OperatorsPage() {
   return (
@@ -41,8 +48,9 @@ function Operators() {
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [isOwner, setIsOwner] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const reload = useCallback(() => setToken((n) => n + 1), []);
 
@@ -50,7 +58,11 @@ function Operators() {
     const controller = new AbortController();
     void (async () => {
       try {
-        const { data } = await platformApi.get<OperatorRow[]>('/operators', undefined, controller.signal);
+        const { data } = await platformApi.get<OperatorRow[]>(
+          '/operators',
+          undefined,
+          controller.signal,
+        );
         setRows(data);
         setStatus('ready');
       } catch {
@@ -60,10 +72,16 @@ function Operators() {
     return () => controller.abort();
   }, [token]);
 
-  const invite = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setNotice(null);
+  const openInvite = () => {
+    setEmail('');
+    setFullName('');
+    setIsOwner(false);
+    setInviteMessage(null);
+    setInviting(true);
+  };
+
+  const invite = async () => {
+    setInviteMessage(null);
 
     try {
       const { data } = await platformApi.post<{ inviteUrl: string }>('/operators', {
@@ -72,19 +90,15 @@ function Operators() {
         isOwner,
       });
       setInviteUrl(data.inviteUrl);
+      setCopied(false);
       setInviting(false);
-      setEmail('');
-      setFullName('');
-      setIsOwner(false);
       reload();
     } catch (caught) {
-      setNotice(
+      setInviteMessage(
         caught instanceof ApiError
           ? (caught.issues[0]?.message ?? caught.message)
           : 'The invitation could not be created.',
       );
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -98,179 +112,247 @@ function Operators() {
     }
   };
 
+  /*
+   * The server refuses to suspend the last active owner — there would be
+   * nobody left who could undo it. The client can see the same thing from
+   * the list it is already holding, so the button says so up front rather
+   * than failing after the click.
+   */
+  const otherActiveOwners = rows.filter(
+    (r) => r.is_owner && r.status === 'active' && r.id !== me?.operatorId,
+  ).length;
+
   if (status === 'loading') {
-    return <p className="text-[0.875rem]" style={{ color: '#64748b' }}>Loading…</p>;
+    return (
+      <>
+        <PageHeader title="Operators" />
+        <Card>
+          <Skeleton className="w-full" height={180} />
+        </Card>
+      </>
+    );
   }
 
-  const field = { background: '#0b1220', color: '#e2e8f0', border: '1px solid #334155' } as const;
+  if (status === 'error') {
+    return (
+      <>
+        <PageHeader title="Operators" />
+        <Alert tone="critical" title="The operator list could not be loaded">
+          Try again, or check that your console session is still valid.
+        </Alert>
+      </>
+    );
+  }
 
   return (
     <>
-      {notice ? (
-        <div className="mb-5 rounded-[8px] px-4 py-3 text-[0.875rem]" style={{ background: '#450a0a', color: '#fecaca' }}>
-          {notice}
-        </div>
-      ) : null}
-
-      {inviteUrl ? (
-        <div
-          className="mb-5 rounded-[8px] px-4 py-3 text-[0.875rem]"
-          style={{ background: '#0b1220', border: '1px solid #334155' }}
-        >
-          <p style={{ color: '#e2e8f0' }}>
-            Invitation created. Send them this link — it is valid for three days, usable once,
-            and not recoverable afterwards.
-          </p>
-          <p className="mt-2 break-all" style={{ color: '#fcd34d' }}>
-            {inviteUrl}
-          </p>
-          <div className="mt-3 flex gap-2">
-            <ConsoleButton onClick={() => void navigator.clipboard?.writeText(inviteUrl)}>
-              Copy link
-            </ConsoleButton>
-            <ConsoleButton onClick={() => setInviteUrl(null)}>Dismiss</ConsoleButton>
-          </div>
-        </div>
-      ) : null}
-
-      <ConsoleCard
+      <PageHeader
         title="Operators"
         subtitle="Everyone who can reach every hospital in this deployment"
-        padded={false}
         action={
-          me?.isOwner && !inviting ? (
-            <ConsoleButton variant="primary" onClick={() => setInviting(true)}>
+          me?.isOwner ? (
+            <Button variant="primary" icon={<IconPlus />} onClick={openInvite}>
               Invite an operator
-            </ConsoleButton>
+            </Button>
           ) : null
         }
-      >
-        {inviting ? (
-          <form onSubmit={invite} className="mb-4 px-5">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="opEmail" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-                  Email
-                </label>
-                <input
-                  id="opEmail"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  className="h-9 w-full rounded-[6px] px-3 text-[0.875rem]"
-                  style={field}
-                />
-              </div>
-              <div>
-                <label htmlFor="opName" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-                  Full name
-                </label>
-                <input
-                  id="opName"
-                  required
-                  value={fullName}
-                  onChange={(event) => setFullName(event.target.value)}
-                  className="h-9 w-full rounded-[6px] px-3 text-[0.875rem]"
-                  style={field}
-                />
-              </div>
-            </div>
+      />
 
-            <label className="mt-3 flex items-start gap-2 text-[0.875rem]" style={{ color: '#cbd5e1' }}>
-              <input
-                type="checkbox"
-                checked={isOwner}
-                onChange={(event) => setIsOwner(event.target.checked)}
-                className="mt-0.5 h-4 w-4"
-              />
-              <span>
-                Make them an owner
-                <span className="block text-[0.75rem]" style={{ color: '#64748b' }}>
-                  Owners can invite and suspend other operators, including you.
-                </span>
-              </span>
-            </label>
+      {notice ? (
+        <div className="mb-5">
+          <Alert tone="critical">{notice}</Alert>
+        </div>
+      ) : null}
 
-            <div className="mt-3 flex gap-2">
-              <ConsoleButton type="submit" variant="primary" disabled={busy}>
-                {busy ? 'Creating…' : 'Create invitation'}
-              </ConsoleButton>
-              <ConsoleButton onClick={() => setInviting(false)} disabled={busy}>
-                Cancel
-              </ConsoleButton>
-            </div>
-          </form>
-        ) : null}
-
-        <div className="px-5 pb-4">
-          <ConsoleTable
-            head={
-              <>
-                <ConsoleTh>Operator</ConsoleTh>
-                <ConsoleTh>Status</ConsoleTh>
-                <ConsoleTh>Role</ConsoleTh>
-                <ConsoleTh align="right">Last signed in</ConsoleTh>
-                {me?.isOwner ? <ConsoleTh align="right">Actions</ConsoleTh> : null}
-              </>
+      {/*
+        Shown once, outside the dialog, because the operator has to act on it:
+        the link is not stored anywhere it can be read again, so a dialog that
+        closed itself would lose it.
+      */}
+      {inviteUrl ? (
+        <div className="mb-5">
+          <Alert
+            tone="good"
+            title="Invitation created"
+            action={
+              <Button variant="ghost" size="sm" onClick={() => setInviteUrl(null)}>
+                Dismiss
+              </Button>
             }
           >
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <ConsoleTd>
-                  <span className="font-medium">{row.full_name}</span>
-                  {row.id === me?.operatorId ? (
-                    <span className="ml-2 text-[0.75rem]" style={{ color: '#64748b' }}>
-                      (you)
-                    </span>
-                  ) : null}
-                  <div className="mt-0.5 text-[0.75rem]" style={{ color: '#64748b' }}>
-                    {row.email}
-                  </div>
-                </ConsoleTd>
-                <ConsoleTd>
-                  <ConsoleBadge value={row.status} />
-                  {row.invite_pending ? (
-                    <div className="mt-1 text-[0.75rem]" style={{ color: '#64748b' }}>
-                      invitation outstanding
-                    </div>
-                  ) : null}
-                </ConsoleTd>
-                <ConsoleTd muted>{row.is_owner ? 'Owner' : 'Operator'}</ConsoleTd>
-                <ConsoleTd align="right" muted>
-                  {row.last_login_at ? new Date(row.last_login_at).toLocaleDateString() : 'never'}
-                </ConsoleTd>
-                {me?.isOwner ? (
-                  <ConsoleTd align="right">
-                    {row.status === 'suspended' ? (
-                      <ConsoleButton onClick={() => void setOperatorStatus(row.id, 'active')}>
-                        Reinstate
-                      </ConsoleButton>
-                    ) : row.status === 'active' ? (
-                      <ConsoleButton
-                        variant="danger"
-                        onClick={() => void setOperatorStatus(row.id, 'suspended')}
-                      >
-                        Suspend
-                      </ConsoleButton>
-                    ) : (
-                      <span className="text-[0.8125rem]" style={{ color: '#475569' }}>
-                        —
-                      </span>
-                    )}
-                  </ConsoleTd>
-                ) : null}
-              </tr>
-            ))}
-          </ConsoleTable>
+            <p>
+              Send them this link. It is valid for three days, usable once, and not recoverable
+              afterwards.
+            </p>
+            <p
+              className="mt-2 rounded-[var(--radius-sm)] px-2.5 py-2 font-mono text-[0.75rem] break-all"
+              style={{ background: 'var(--surface)', color: 'var(--ink)' }}
+            >
+              {inviteUrl}
+            </p>
+            <Button
+              className="mt-2"
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                void navigator.clipboard?.writeText(inviteUrl);
+                setCopied(true);
+              }}
+            >
+              {copied ? 'Copied' : 'Copy link'}
+            </Button>
+          </Alert>
         </div>
-      </ConsoleCard>
-
-      {!me?.isOwner ? (
-        <p className="mt-4 text-[0.8125rem]" style={{ color: '#475569' }}>
-          Only a console owner can invite or suspend operators.
-        </p>
       ) : null}
+
+      <Card>
+        <CardHeader
+          title="Console accounts"
+          subtitle={
+            me?.isOwner
+              ? 'Owners can invite and suspend other operators, including each other'
+              : 'Only a console owner can invite or suspend operators'
+          }
+        />
+
+        <Table className="min-w-[44rem]">
+          <thead>
+            <tr>
+              <Th>Operator</Th>
+              <Th>Status</Th>
+              <Th>Role</Th>
+              <Th align="right">Last signed in</Th>
+              {me?.isOwner ? <Th align="right">Actions</Th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <Td colSpan={me?.isOwner ? 5 : 4}>
+                  <EmptyState
+                    title="No operators"
+                    description="This cannot normally happen — you are signed in as one."
+                  />
+                </Td>
+              </tr>
+            ) : (
+              rows.map((row) => (
+                <Tr key={row.id}>
+                  <Td>
+                    <div className="flex items-center gap-2.5">
+                      <Avatar name={row.full_name} size={32} />
+                      <div className="min-w-0">
+                        <p className="text-[0.875rem] font-medium" style={{ color: 'var(--ink)' }}>
+                          {row.full_name}
+                          {row.id === me?.operatorId ? (
+                            <span
+                              className="ml-2 text-[0.75rem] font-normal"
+                              style={{ color: 'var(--ink-muted)' }}
+                            >
+                              (you)
+                            </span>
+                          ) : null}
+                        </p>
+                        <p className="text-[0.75rem]" style={{ color: 'var(--ink-muted)' }}>
+                          {row.email}
+                        </p>
+                      </div>
+                    </div>
+                  </Td>
+                  <Td>
+                    <StatusBadge value={row.status} />
+                    {row.invite_pending ? (
+                      <div className="mt-1 text-[0.75rem]" style={{ color: 'var(--ink-muted)' }}>
+                        invitation outstanding
+                      </div>
+                    ) : null}
+                  </Td>
+                  <Td style={{ color: 'var(--ink-secondary)' }}>
+                    {row.is_owner ? 'Owner' : 'Operator'}
+                  </Td>
+                  <Td align="right" style={{ color: 'var(--ink-secondary)' }}>
+                    {row.last_login_at ? new Date(row.last_login_at).toLocaleDateString() : 'never'}
+                  </Td>
+                  {me?.isOwner ? (
+                    <Td align="right">
+                      {row.status === 'suspended' ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => void setOperatorStatus(row.id, 'active')}
+                        >
+                          Reinstate
+                        </Button>
+                      ) : row.status === 'active' ? (
+                        (() => {
+                          const lastOwner = row.is_owner && otherActiveOwners === 0;
+                          return (
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              disabled={lastOwner}
+                              title={
+                                lastOwner
+                                  ? 'The last active console owner cannot be suspended. Make someone else an owner first.'
+                                  : undefined
+                              }
+                              onClick={() => void setOperatorStatus(row.id, 'suspended')}
+                            >
+                              Suspend
+                            </Button>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-[0.8125rem]" style={{ color: 'var(--ink-muted)' }}>
+                          —
+                        </span>
+                      )}
+                    </Td>
+                  ) : null}
+                </Tr>
+              ))
+            )}
+          </tbody>
+        </Table>
+      </Card>
+
+      <FormDialog
+        open={inviting}
+        onClose={() => setInviting(false)}
+        className="console-root"
+        title="Invite an operator"
+        description="Creates an account with no password. They choose one from a link you send them."
+        submitLabel="Create invitation"
+        onSubmit={invite}
+        message={inviteMessage}
+        disabled={!email.includes('@') || fullName.trim().length < 2}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            name="opEmail"
+            label="Email"
+            type="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+          <Field
+            name="opName"
+            label="Full name"
+            required
+            value={fullName}
+            onChange={(event) => setFullName(event.target.value)}
+          />
+        </div>
+
+        <Checkbox
+          name="isOwner"
+          label="Make them an owner"
+          hint="Owners can invite and suspend other operators, including you."
+          checked={isOwner}
+          onChange={(event) => setIsOwner(event.target.checked)}
+        />
+      </FormDialog>
     </>
   );
 }

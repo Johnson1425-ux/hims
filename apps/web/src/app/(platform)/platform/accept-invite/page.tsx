@@ -11,7 +11,9 @@ import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ApiError, platformApi, type Operator } from '@/lib/platform-api';
 import { usePlatformSession } from '@/lib/platform-session';
-import { ConsoleButton } from '@/components/platform/console-shell';
+import { Alert, Button, Card, Skeleton } from '@/components/ui/primitives';
+import { Field } from '@/components/ui/forms';
+import { ConsoleBrandMark } from '@/components/platform/console-shell';
 
 function AcceptInvite() {
   const params = useSearchParams();
@@ -56,93 +58,62 @@ function AcceptInvite() {
     }
   };
 
-  const field = { background: '#0b1220', color: '#e2e8f0', border: '1px solid #334155' } as const;
-
   if (!token) {
     return (
-      <div
-        className="rounded-[8px] px-4 py-3 text-[0.8125rem]"
-        style={{ background: '#450a0a', color: '#fecaca' }}
-      >
-        This link is missing its token. Ask the console owner who invited you to send it again.
-      </div>
+      <Alert tone="critical" title="This link is missing its token">
+        Ask the console owner who invited you to send it again.
+      </Alert>
     );
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      {error ? (
-        <div
-          className="rounded-[8px] px-3 py-2.5 text-[0.8125rem]"
-          style={{ background: '#450a0a', color: '#fecaca' }}
-        >
-          {error}
-        </div>
-      ) : null}
+    <Card>
+      <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        {error ? <Alert tone="critical">{error}</Alert> : null}
 
-      {issues.length > 0 ? (
-        <div
-          className="rounded-[8px] px-3 py-2.5 text-[0.8125rem]"
-          style={{ background: '#450a0a', color: '#fecaca' }}
-        >
-          <p className="mb-1 font-medium">Choose a different password:</p>
-          <ul className="list-disc pl-4">
-            {issues.map((issue) => (
-              <li key={issue}>{issue}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+        {issues.length > 0 ? (
+          <Alert tone="critical" title="Choose a different password">
+            <ul className="mt-1 list-disc pl-4">
+              {issues.map((issue) => (
+                <li key={issue}>{issue}</li>
+              ))}
+            </ul>
+          </Alert>
+        ) : null}
 
-      <div>
-        <label htmlFor="password" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-          Choose a password
-        </label>
-        <input
-          id="password"
+        <Field
+          name="password"
+          label="Choose a password"
           type="password"
           autoComplete="new-password"
           required
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          className="h-10 w-full rounded-[6px] px-3 text-[0.875rem]"
-          style={field}
+          hint="Nobody else ever sees this, including whoever invited you — which is what makes a console action attributable to you."
         />
-        <p className="mt-1.5 text-[0.75rem]" style={{ color: '#64748b' }}>
-          Nobody else ever sees this, including whoever invited you — which is what makes a
-          console action attributable to you.
-        </p>
-      </div>
 
-      <div>
-        <label htmlFor="confirm" className="mb-1.5 block text-[0.8125rem]" style={{ color: '#94a3b8' }}>
-          Confirm it
-        </label>
-        <input
-          id="confirm"
+        <Field
+          name="confirm"
+          label="Confirm it"
           type="password"
           autoComplete="new-password"
           required
           value={confirm}
           onChange={(event) => setConfirm(event.target.value)}
-          className="h-10 w-full rounded-[6px] px-3 text-[0.875rem]"
-          style={{ ...field, border: `1px solid ${mismatch ? '#991b1b' : '#334155'}` }}
+          error={mismatch ? 'These do not match.' : undefined}
         />
-        {mismatch ? (
-          <p className="mt-1.5 text-[0.75rem]" style={{ color: '#fca5a5' }}>
-            These do not match.
-          </p>
-        ) : null}
-      </div>
 
-      <ConsoleButton
-        type="submit"
-        variant="primary"
-        disabled={submitting || mismatch || password.length === 0}
-      >
-        {submitting ? 'Setting your password…' : 'Set password and sign in'}
-      </ConsoleButton>
-    </form>
+        <Button
+          type="submit"
+          variant="primary"
+          size="lg"
+          loading={submitting}
+          disabled={submitting || mismatch || password.length === 0}
+        >
+          {submitting ? 'Setting your password…' : 'Set password and sign in'}
+        </Button>
+      </form>
+    </Card>
   );
 }
 
@@ -150,29 +121,16 @@ export default function AcceptInvitePage() {
   return (
     <div className="console-root flex min-h-screen items-center justify-center p-5">
       <div className="w-full max-w-[26rem]">
-        <div className="mb-6 flex items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="flex h-9 w-9 items-center justify-center rounded-[8px] text-[1rem] font-bold"
-            style={{ background: '#f59e0b', color: '#0b1220' }}
-          >
-            V
-          </span>
-          <div>
-            <h1 className="text-[1.125rem] font-semibold" style={{ color: '#f1f5f9' }}>
-              Join the platform console
-            </h1>
-            <p className="text-[0.8125rem]" style={{ color: '#64748b' }}>
-              Vendor operations across every hospital
-            </p>
-          </div>
-        </div>
+        <ConsoleBrandMark
+          title="Join the platform console"
+          subtitle="Vendor operations across every hospital"
+        />
 
         <Suspense
           fallback={
-            <p className="text-[0.875rem]" style={{ color: '#64748b' }}>
-              Loading…
-            </p>
+            <Card>
+              <Skeleton className="w-full" height={120} />
+            </Card>
           }
         >
           <AcceptInvite />

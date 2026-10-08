@@ -104,6 +104,17 @@
   --info-soft: #eef5ff;
   --info-ink: #184f95;
 
+  /* Vendor console. A second accent, used NOWHERE in a hospital's own screens,
+     so the surface that reaches every hospital never reads as one of them. It
+     is a role rather than a pinned palette: `.console-root` maps `--accent`
+     onto it, and both themes define their own instance. */
+  --vendor: #92610a;
+  --vendor-hover: #7a5100;
+  --vendor-soft: #fff6e4;
+  --vendor-ink: #7a5300;
+  --vendor-on: #ffffff;
+  --vendor-ring: rgb(146 97 10 / 0.35);
+
   /* Chart roles: the validated instance for this surface */
   --chart-surface: #ffffff;
   --chart-grid: #e8ebf1;
@@ -176,6 +187,13 @@
     --info-soft: #16233a;
     --info-ink: #9ec5f4;
 
+    --vendor: #f0b429;
+    --vendor-hover: #f8c858;
+    --vendor-soft: #2e2311;
+    --vendor-ink: #f5ca6b;
+    --vendor-on: #0d1116;
+    --vendor-ring: rgb(240 180 41 / 0.45);
+
     --chart-surface: #15191f;
     --chart-grid: #232a33;
     --chart-axis: #353d48;
@@ -241,6 +259,13 @@
   --critical-ink: #f08a8a;
   --info-soft: #16233a;
   --info-ink: #9ec5f4;
+
+  --vendor: #f0b429;
+  --vendor-hover: #f8c858;
+  --vendor-soft: #2e2311;
+  --vendor-ink: #f5ca6b;
+  --vendor-on: #0d1116;
+  --vendor-ring: rgb(240 180 41 / 0.45);
 
   --chart-surface: #15191f;
   --chart-grid: #232a33;
@@ -437,17 +462,44 @@ textarea {
 /* ---------------------------------------------------------------------------
  * Platform console
  *
- * The vendor console pins its own dark palette rather than following the
- * light/dark preference the rest of the product honours. That is deliberate:
- * this surface crosses hospital boundaries, and it must never be mistakable
- * at a glance for a hospital's own screens. See `ConsoleShell`.
+ * The vendor console has to be unmistakable at a glance. Everything else in
+ * this product is a hospital's own system, scoped to one tenant; this one can
+ * reach every hospital in the deployment, and an operator who cannot tell
+ * which of the two they are looking at will eventually act in the wrong one.
+ *
+ * It used to pin a dark palette to make that point, which cost every operator
+ * who prefers a light screen their preference and left the console as the one
+ * surface in the product that ignored the theme. So the cue moved to the
+ * ACCENT instead: inside `.console-root` the interactive accent is remapped
+ * onto the vendor amber, which no hospital screen ever uses. Every primitive
+ * picks it up without knowing it is in the console — primary buttons, the
+ * current nav item, the focus ring, text selection — and it survives both
+ * themes, which a pinned palette could not.
  * ------------------------------------------------------------------------- */
 .console-root {
-  background: #0d1117;
-  color: #e2e8f0;
-  color-scheme: dark;
+  --accent: var(--vendor);
+  --accent-hover: var(--vendor-hover);
+  --accent-soft: var(--vendor-soft);
+  --accent-ring: var(--vendor-ring);
+  --ink-on-brand: var(--vendor-on);
+
+  background: var(--page);
+  color: var(--ink);
 }
 
-.console-root a {
-  color: inherit;
+/* The standing banner. A diagonal hatch rather than a flat fill: it reads as
+   a boundary marker at any size, including the two-line strip it occupies on
+   a phone, and it does not depend on the amber alone to be noticed.
+
+   The stripe contrast is deliberately low. At 14% it read as hazard tape on
+   the dark surface — loud enough to be the first thing on every screen, which
+   is how a standing warning stops being read at all. */
+.console-watermark {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--vendor-soft),
+    var(--vendor-soft) 9px,
+    color-mix(in srgb, var(--vendor) 6%, var(--vendor-soft)) 9px,
+    color-mix(in srgb, var(--vendor) 6%, var(--vendor-soft)) 18px
+  );
 }
