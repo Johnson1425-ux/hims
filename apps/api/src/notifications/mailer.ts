@@ -155,6 +155,13 @@ export async function sendEmail(args: {
   to: string;
   subject: string;
   text: string;
+  /**
+   * Sent ALONGSIDE the text, never instead of it. nodemailer builds a
+   * multipart/alternative, so a client that refuses HTML still has
+   * something to show, and a message with no text part is treated as a
+   * spam signal by most filters.
+   */
+  html?: string;
 }): Promise<string> {
   try {
     const info = await getTransport().sendMail({
@@ -166,6 +173,7 @@ export async function sendEmail(args: {
       to: args.to,
       subject: args.subject,
       text: args.text,
+      html: args.html,
     });
 
     return info.messageId;

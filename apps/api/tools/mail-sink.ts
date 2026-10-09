@@ -8,7 +8,7 @@
  * no TLS negotiation, no address resolution, no bounce handling.
  *
  *   pnpm mail:sink                      prints each message to the terminal
- *   pnpm mail:sink -- --out ./mail      also writes each one as .json
+ *   pnpm mail:sink -- --out ./mail      also writes each one as .json and .html
  *   pnpm mail:sink -- --reject          refuses everything with a hard 550
  *   pnpm mail:sink -- --quota           refuses with Gmail's 550 5.4.5
  *
@@ -86,6 +86,10 @@ const server = new SMTPServer({
           to: mail.to && 'text' in mail.to ? mail.to.text : undefined,
           subject: mail.subject,
           text: mail.text,
+          // Captured so the rendered message can be opened in a browser
+          // exactly as it left the process, rather than re-rendered from a
+          // preview that might have drifted from what is actually sent.
+          html: typeof mail.html === 'string' ? mail.html : null,
           messageId: mail.messageId,
         };
 
@@ -97,9 +101,12 @@ const server = new SMTPServer({
         );
 
         if (OUT) {
-          const name = `${OUT}/${String(count).padStart(3, '0')}.json`;
-          writeFileSync(name, JSON.stringify(record, null, 2));
-          process.stdout.write(`    (written to ${name})\n`);
+          const stem = `${OUT}/${String(count).padStart(3, '0')}`;
+          writeFileSync(`${stem}.json`, JSON.stringify(record, null, 2));
+          if (record.html) writeFileSync(`${stem}.html`, record.html);
+          process.stdout.write(
+            `    (written to ${stem}.json${record.html ? ` and ${stem}.html` : ''})\n`,
+          );
         }
 
         callback();
