@@ -219,6 +219,8 @@ export interface BillingContact {
   id: string;
   full_name: string;
   email: string;
+  /** `invited` means they have not followed their invitation link yet. */
+  status: 'active' | 'invited';
 }
 
 export interface TenantDetail extends TenantRow {

@@ -503,7 +503,7 @@ export async function issueDueInvoices(
         if (notified === 0) {
           skipped.push({
             tenantName: row.display_name,
-            reason: `${invoice.invoice_number} was issued, but this hospital has no active administrator to send it to. Send it on by hand.`,
+            reason: `${invoice.invoice_number} was issued, but nobody at this hospital holds tenant:settings, so there is no one to send it to. Give an administrator that permission, or send it on by hand.`,
           });
         }
 
@@ -592,14 +592,32 @@ function formatDay(value: string | Date): string {
 export async function billingRecipients(
   db: Queryable,
   tenantId: string,
-): Promise<Array<{ id: string; full_name: string; email: string }>> {
-  const { rows } = await db.query<{ id: string; full_name: string; email: string }>(
-    `SELECT DISTINCT u.id, u.full_name, u.email
+): Promise<Array<{ id: string; full_name: string; email: string; status: string }>> {
+  const { rows } = await db.query<{
+    id: string;
+    full_name: string;
+    email: string;
+    status: string;
+  }>(
+    // INVITED COUNTS, and leaving it out was a real bug: a hospital's first
+    // administrator is `invited` until they follow their link, so a freshly
+    // provisioned customer had NOBODY to bill. The invoice was issued, queued
+    // for no one, and never sent — the console said so in the run result and
+    // nowhere else.
+    //
+    // Their address is not a guess. It is where the invitation itself was
+    // sent, chosen by the operator who set the hospital up, and they are by
+    // definition the person responsible for paying. Waiting for them to pick
+    // a password before telling them they owe money has it backwards.
+    //
+    // `suspended` and `deactivated` stay out: those are people the hospital
+    // has deliberately switched off.
+    `SELECT DISTINCT u.id, u.full_name, u.email, u.status
        FROM users u
        JOIN user_roles ur ON ur.user_id = u.id
        JOIN role_permissions rp ON rp.role_id = ur.role_id
       WHERE u.tenant_id = $1
-        AND u.status = 'active'
+        AND u.status IN ('active', 'invited')
         AND rp.permission_key = 'tenant:settings'
         AND (ur.expires_at IS NULL OR ur.expires_at > now())
       ORDER BY u.full_name`,
@@ -638,7 +656,7 @@ async function queueBillingNotice(
   if (recipients.length === 0) {
     logger.warn(
       { tenantId: args.tenantId, templateKey: args.templateKey, ...args.context },
-      'no active administrator holds tenant:settings; nobody was notified',
+      'nobody at this hospital holds tenant:settings; nobody was notified',
     );
     return 0;
   }
@@ -690,7 +708,7 @@ async function notifyInvoiceIssued(
   if (admins.length === 0) {
     logger.warn(
       { tenantId: invoice.tenant_id, invoiceNumber: invoice.invoice_number },
-      'invoice issued to a hospital with no active administrator; nobody was notified',
+      'invoice issued to a hospital with nobody holding tenant:settings; nobody was notified',
     );
     return 0;
   }

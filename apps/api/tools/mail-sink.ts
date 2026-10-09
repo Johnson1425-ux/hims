@@ -10,6 +10,7 @@
  *   pnpm mail:sink                      prints each message to the terminal
  *   pnpm mail:sink -- --out ./mail      also writes each one as .json
  *   pnpm mail:sink -- --reject          refuses everything with a hard 550
+ *   pnpm mail:sink -- --quota           refuses with Gmail's 550 5.4.5
  *
  * Then, in .env:
  *
@@ -21,6 +22,11 @@
  * `--reject` is how you exercise the failure path on purpose: a 5xx is
  * treated as final and the notification is failed rather than retried, which
  * is a branch that is otherwise only reached in production by a real bounce.
+ *
+ * `--quota` is the other half of it, and the reason that branch is not simply
+ * "5xx means give up": Gmail answers an exhausted daily allowance with
+ * `550 5.4.5`, a permanent-looking code for something that clears in a day.
+ * That one must come back queued, not failed.
  */
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { SMTPServer } from 'smtp-server';
@@ -34,6 +40,7 @@ function arg(name: string): string | undefined {
 const PORT = Number(arg('port') ?? 2525);
 const OUT = arg('out');
 const REJECT = process.argv.includes('--reject');
+const QUOTA = process.argv.includes('--quota');
 
 if (OUT) mkdirSync(OUT, { recursive: true });
 
@@ -48,6 +55,16 @@ const server = new SMTPServer({
   disabledCommands: ['STARTTLS'],
 
   onRcptTo(address, _session, callback) {
+    if (QUOTA) {
+      // Verbatim from Gmail, down to the enhanced status code.
+      const error = Object.assign(
+        new Error('550 5.4.5 Daily user sending quota exceeded. - gsmtp'),
+        { responseCode: 550 },
+      );
+      process.stdout.write(`over quota  ${address.address}\n`);
+      return callback(error);
+    }
+
     if (!REJECT) return callback();
 
     const error = Object.assign(
@@ -105,7 +122,11 @@ server.on('error', (error: NodeJS.ErrnoException) => {
 server.listen(PORT, '127.0.0.1', () => {
   process.stdout.write(
     `mail sink listening on 127.0.0.1:${PORT}` +
-      (REJECT ? ' — refusing everything with 550\n' : '\n') +
+      (QUOTA
+        ? ' — refusing everything with 550 5.4.5 (over quota)\n'
+        : REJECT
+          ? ' — refusing everything with 550 5.1.1 (no such user)\n'
+          : '\n') +
       `set SMTP_HOST=127.0.0.1 SMTP_PORT=${PORT} SMTP_INSECURE=true MAIL_PROVIDER=smtp\n`,
   );
 });

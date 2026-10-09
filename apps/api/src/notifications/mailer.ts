@@ -37,6 +37,44 @@ export function isPermanentDeliveryError(error: unknown): boolean {
   return error instanceof PermanentDeliveryError;
 }
 
+/**
+ * A refusal that will clear on its own, given time.
+ *
+ * NOT EVERY 5xx IS FINAL, which is the trap. Gmail answers a full daily quota
+ * with `550 5.4.5 Daily user sending quota exceeded` — a permanent-looking
+ * code for a condition that clears in about a day. Treating it as final would
+ * drop every queued invoice on the floor the moment the cap was reached.
+ *
+ * Retrying it hard is the other way to get this wrong: continued attempts
+ * against an exhausted quota can extend the lockout. So these are deferred by
+ * hours rather than minutes, and they do not count against the row's attempt
+ * budget — the message is not failing, it is waiting its turn.
+ */
+export class TransientDeliveryError extends Error {
+  readonly transient = true;
+
+  constructor(
+    message: string,
+    readonly retryAfterMinutes: number,
+  ) {
+    super(message);
+    this.name = 'TransientDeliveryError';
+  }
+}
+
+export function transientRetryMinutes(error: unknown): number | null {
+  return error instanceof TransientDeliveryError ? error.retryAfterMinutes : null;
+}
+
+/**
+ * 5xx codes and phrasings that mean "not now" rather than "not ever".
+ *
+ * Matched on the text as well as the code because the enhanced status is the
+ * part that carries the meaning — 5.4.5 is a quota, 5.1.1 is a mailbox that
+ * does not exist — and not every server sends one.
+ */
+const TRANSIENT_5XX = /\b5\.4\.5\b|quota|rate limit|too many|try again|throttl|temporarily|service unavailable|busy/i;
+
 let transport: Transporter | null = null;
 
 export function mailConfigured(): boolean {
@@ -133,10 +171,20 @@ export async function sendEmail(args: {
     return info.messageId;
   } catch (error) {
     const code = (error as { responseCode?: number }).responseCode;
+    const message = (error as Error).message ?? '';
 
     if (typeof code === 'number' && code >= 500 && code < 600) {
+      if (TRANSIENT_5XX.test(message)) {
+        // Two hours, not minutes: a daily quota resets on a 24-hour window,
+        // and hammering it is what prolongs the block.
+        throw new TransientDeliveryError(
+          `the receiving server is refusing for now (${code}): ${message}`,
+          120,
+        );
+      }
+
       throw new PermanentDeliveryError(
-        `the receiving server refused this permanently (${code}): ${(error as Error).message}`,
+        `the receiving server refused this permanently (${code}): ${message}`,
       );
     }
 

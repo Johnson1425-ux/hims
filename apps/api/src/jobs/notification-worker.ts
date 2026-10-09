@@ -25,6 +25,7 @@ import {
   isPermanentDeliveryError,
   mailConfigured,
   sendEmail,
+  transientRetryMinutes,
   verifyMailTransport,
 } from '../notifications/mailer.js';
 
@@ -332,13 +333,41 @@ async function processBatch(): Promise<{ sent: number; failed: number; materiali
 
           sent += 1;
         } catch (error) {
+          /*
+           * DEFERRED, NOT FAILED. Some 5xx replies mean "not now" rather than
+           * "not ever" — Gmail answers an exhausted daily quota with
+           * `550 5.4.5`, which clears in about a day. The message has not
+           * failed, so it does not spend an attempt; it is pushed out by
+           * hours and tried again, because retrying hard against a quota is
+           * what extends the lockout.
+           */
+          const deferFor = transientRetryMinutes(error);
+
+          if (deferFor !== null) {
+            await db.query(
+              `UPDATE notifications
+                  SET status = 'queued',
+                      scheduled_for = now() + make_interval(mins => $2),
+                      failure_reason = $3
+                WHERE id = $1`,
+              [row.id, deferFor, error instanceof Error ? error.message.slice(0, 500) : 'deferred'],
+            );
+
+            failed += 1;
+            logger.warn(
+              { notificationId: row.id, channel: row.channel, deferMinutes: deferFor },
+              'notification deferred; the receiving server is refusing for now',
+            );
+            continue;
+          }
+
           const attempts = row.attempts + 1;
 
-          // A 5xx from the receiving server is a verdict, not a hiccup: the
-          // mailbox does not exist or the message was rejected outright.
-          // Retrying it three more times on a backoff achieves nothing and
-          // tells the receiving side this sender keeps mailing addresses
-          // that bounce.
+          // A 5xx from the receiving server is otherwise a verdict, not a
+          // hiccup: the mailbox does not exist or the message was rejected
+          // outright. Retrying it three more times on a backoff achieves
+          // nothing and tells the receiving side this sender keeps mailing
+          // addresses that bounce.
           const permanent = isPermanentDeliveryError(error);
           const exhausted = permanent || attempts >= row.max_attempts;
 
