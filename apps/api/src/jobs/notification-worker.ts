@@ -20,6 +20,7 @@ import { withoutTenantIsolation, type Queryable } from '../db/pool.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { createFieldCipher } from '../security/crypto.js';
+import { renderNotificationHtml } from '../notifications/email-content.js';
 import {
   closeMailTransport,
   isPermanentDeliveryError,
@@ -122,14 +123,19 @@ async function resolveDestination(
 async function render(
   db: Queryable,
   row: NotificationRow,
-): Promise<{ subject: string | null; body: string } | null> {
+): Promise<{ subject: string | null; body: string; isTenantOverride: boolean } | null> {
   if (row.body) {
-    return { subject: row.subject, body: row.body };
+    return { subject: row.subject, body: row.body, isTenantOverride: true };
   }
   if (!row.template_key) return null;
 
-  const { rows } = await db.query<{ subject: string | null; body: string; phi_safe: boolean }>(
-    `SELECT subject, body, phi_safe
+  const { rows } = await db.query<{
+    subject: string | null;
+    body: string;
+    phi_safe: boolean;
+    tenant_id: string | null;
+  }>(
+    `SELECT subject, body, phi_safe, tenant_id
        FROM notification_templates
       WHERE key = $1 AND channel = $2 AND is_active
         AND (tenant_id = $3 OR tenant_id IS NULL)
@@ -166,14 +172,37 @@ async function render(
   return {
     subject: template.subject ? interpolate(template.subject) : null,
     body: interpolate(template.body),
+    isTenantOverride: template.tenant_id !== null,
   };
+}
+
+/**
+ * The hospital's own name, for the top of its own emails.
+ *
+ * Cached for the life of the process: it changes about once, and a batch of
+ * fifty reminders for one hospital should not be fifty lookups.
+ */
+const tenantNames = new Map<string, string>();
+
+async function tenantName(db: Queryable, tenantId: string): Promise<string> {
+  const cached = tenantNames.get(tenantId);
+  if (cached !== undefined) return cached;
+
+  const { rows } = await db.query<{ display_name: string }>(
+    'SELECT display_name FROM tenants WHERE id = $1',
+    [tenantId],
+  );
+
+  const name = rows[0]?.display_name ?? '';
+  tenantNames.set(tenantId, name);
+  return name;
 }
 
 /** Dispatch through the configured provider, or log in development. */
 async function deliver(
   channel: string,
   destination: string,
-  content: { subject: string | null; body: string },
+  content: { subject: string | null; body: string; html?: string },
 ): Promise<{ providerMessageId: string; provider: string }> {
   if (channel === 'email' && mailConfigured()) {
     const messageId = await sendEmail({
@@ -183,6 +212,7 @@ async function deliver(
       // misconfigured template cannot produce a blank-subject email.
       subject: content.subject ?? 'A message from your hospital system',
       text: content.body,
+      html: content.html,
     });
 
     return { providerMessageId: messageId, provider: 'smtp' };
@@ -320,7 +350,30 @@ async function processBatch(): Promise<{ sent: number; failed: number; materiali
             continue;
           }
 
-          const result = await deliver(row.channel, destination, content);
+          /*
+           * The HTML is built from the PAYLOAD, not from the rendered text,
+           * so each value can be escaped on the way into markup and the
+           * signed download URL can go in a button's href instead of being
+           * read out mid-sentence. The plain text still goes in the same
+           * message as the alternative part — for clients that refuse HTML,
+           * for anyone who prefers it, and because a mail with no text part
+           * scores worse with every spam filter there is.
+           */
+          const html =
+            row.channel === 'email'
+              ? renderNotificationHtml({
+                  templateKey: row.template_key,
+                  payload: row.payload,
+                  subject: content.subject,
+                  text: content.body,
+                  tenantName: await tenantName(db, row.tenant_id),
+                  vendorName: env.INVOICE_VENDOR_NAME,
+                  vendorAddress: env.INVOICE_VENDOR_ADDRESS,
+                  isTenantOverride: content.isTenantOverride,
+                })
+              : undefined;
+
+          const result = await deliver(row.channel, destination, { ...content, html });
 
           await db.query(
             `UPDATE notifications

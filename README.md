@@ -495,6 +495,8 @@ pnpm db:seed             # two hospitals of demo data
 pnpm --filter @hims/api worker:notifications   # outbox drain (pnpm dev runs this already)
 pnpm --filter @hims/api worker:scheduler       # maintenance tasks
 pnpm --filter @hims/api mail:sink              # local SMTP server, prints what was sent
+pnpm --filter @hims/api mail:preview           # render every template to HTML you can open
+pnpm --filter @hims/api mail:preview -- --eml --to you@example.com   # ...and as .eml files
 ```
 
 `pnpm dev` starts the API, the web app **and the notification worker**. The
@@ -530,6 +532,25 @@ Resend, a hospital's own Exchange relay — because there is no vendor SDK in
 the path. The port decides the encryption: 465 is implicit TLS, anything else
 is STARTTLS, which is **required** rather than attempted. `MAIL_FROM` has to
 be an address your provider has authorised, or everything comes back 5xx.
+
+Every email goes out as **multipart/alternative** — an HTML part and the
+plain text, never one without the other. The HTML is table-based with inline
+styles, because Outlook renders through Word and Gmail strips `<style>` in
+several configurations; links that matter are buttons, with a VML rectangle
+so Outlook draws one too. Nothing is fetched: no web fonts, no images, not
+even a logo, since images are blocked by default and a tracking pixel is not
+something a hospital system should normalise.
+
+`pnpm mail:preview` writes every template to HTML with sample data so you can
+look at them before anyone receives one, and with `--eml` also writes each as
+a complete MIME file — open one in a mail client and it renders exactly as a
+recipient would see it, which is a truer check than a browser; `pnpm mail:sink -- --out ./mail`
+saves what was actually delivered, HTML included.
+
+A template's wording lives in `notification_templates`; its structure —
+heading, figures panel, button — lives in `src/notifications/email-content.ts`.
+A template with no entry there, and any template a hospital has overridden
+with its own wording, falls back to that text poured into the same shell.
 
 Gmail works for development: `smtp.gmail.com:587`, your full address as
 `SMTP_USER`, and a 16-character **App Password** as `SMTP_PASSWORD` (account
