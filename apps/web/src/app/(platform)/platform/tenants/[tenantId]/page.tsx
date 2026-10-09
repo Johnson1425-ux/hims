@@ -24,6 +24,7 @@ import { SubscriptionPanel } from '@/components/platform/subscription-panel';
 import {
   Alert,
   Avatar,
+  Badge,
   Button,
   Card,
   CardHeader,
@@ -484,6 +485,16 @@ function BillingContacts({ tenant }: { tenant: TenantDetail }) {
               >
                 {contact.email}
               </a>
+              {/*
+                They still receive everything — the address is where their
+                invitation went — but an operator chasing an invoice should
+                know this person has not signed in yet.
+              */}
+              {contact.status === 'invited' ? (
+                <Badge tone="info" dot>
+                  invitation not accepted
+                </Badge>
+              ) : null}
             </li>
           ))}
         </ul>

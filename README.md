@@ -492,10 +492,17 @@ pnpm db:status           # applied vs pending
 pnpm db:verify           # checksums, RLS coverage, audit-chain integrity
 pnpm db:seed             # two hospitals of demo data
 
-pnpm --filter @hims/api worker:notifications   # outbox drain
+pnpm --filter @hims/api worker:notifications   # outbox drain (pnpm dev runs this already)
 pnpm --filter @hims/api worker:scheduler       # maintenance tasks
 pnpm --filter @hims/api mail:sink              # local SMTP server, prints what was sent
 ```
+
+`pnpm dev` starts the API, the web app **and the notification worker**. The
+worker is what turns a queued notification into an email; without it every
+invoice and receipt is written correctly, queued correctly, and silently
+never sent. In production it is a separate deployment — if you run the API
+alone, the API logs a warning at startup when it finds a backlog nothing is
+draining.
 
 ### Email
 
