@@ -3,6 +3,12 @@
  *
  *   pnpm mail:preview              writes to ./email-preview
  *   pnpm mail:preview -- --out /tmp/mail
+ *   pnpm mail:preview -- --eml --to me@example.com
+ *
+ * `--eml` additionally writes each message as a complete MIME file. Opening
+ * one in a mail client shows it exactly as a recipient would see it, headers
+ * and both alternative parts included — which is a truer check than a
+ * browser, and the only one available when outbound SMTP is not.
  *
  * Email is the one surface with no staging environment: once it is sent it
  * is sent, and the only way to know a template looks right is to look at it.
@@ -30,7 +36,32 @@ function arg(name: string): string | undefined {
 }
 
 const OUT = arg('out') ?? 'email-preview';
+const EML = process.argv.includes('--eml');
+const TO = arg('to') ?? 'recipient@example.com';
 mkdirSync(OUT, { recursive: true });
+
+/**
+ * Builds the MIME without sending it.
+ *
+ * nodemailer's stream transport runs the same composer the SMTP transport
+ * does, so the file is byte-for-byte what would have gone over the wire
+ * rather than an approximation assembled for the preview.
+ */
+async function writeEml(stem: string, subject: string, text: string, html: string): Promise<void> {
+  const nodemailer = (await import('nodemailer')).default;
+  const transport = nodemailer.createTransport({ streamTransport: true, buffer: true });
+
+  const info = await transport.sendMail({
+    from: env.MAIL_FROM,
+    replyTo: env.MAIL_REPLY_TO || undefined,
+    to: TO,
+    subject,
+    text,
+    html,
+  });
+
+  writeFileSync(`${stem}.eml`, info.message as Buffer);
+}
 
 const INVOICE_URL =
   'http://localhost:4000/api/v1/subscription-invoices/3be2ae9d-8acd-4503-8bb4-9e053668633e.pdf' +
@@ -124,6 +155,14 @@ for (const sample of SAMPLES) {
   });
 
   writeFileSync(`${OUT}/${sample.key}.html`, html);
+  if (EML) {
+    await writeEml(
+      `${OUT}/${sample.key}`,
+      sample.subject,
+      'This is the plain-text alternative. The HTML part carries the same message with a button.',
+      html,
+    );
+  }
   links.push(`<li><a href="${sample.key}.html">${sample.key}</a> — ${sample.subject}</li>`);
 }
 
@@ -149,4 +188,8 @@ writeFileSync(
   <h1>Email previews</h1><ul style="line-height:2">${links.join('')}</ul></body>`,
 );
 
-process.stdout.write(`wrote ${SAMPLES.length + 2} files to ${OUT}/ — open ${OUT}/index.html\n`);
+process.stdout.write(
+  `wrote ${SAMPLES.length + 2} files to ${OUT}/ — open ${OUT}/index.html` +
+    (EML ? `\nalso wrote .eml for each, addressed to ${TO}` : '') +
+    '\n',
+);

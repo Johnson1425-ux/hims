@@ -496,6 +496,7 @@ pnpm --filter @hims/api worker:notifications   # outbox drain (pnpm dev runs thi
 pnpm --filter @hims/api worker:scheduler       # maintenance tasks
 pnpm --filter @hims/api mail:sink              # local SMTP server, prints what was sent
 pnpm --filter @hims/api mail:preview           # render every template to HTML you can open
+pnpm --filter @hims/api mail:preview -- --eml --to you@example.com   # ...and as .eml files
 ```
 
 `pnpm dev` starts the API, the web app **and the notification worker**. The
@@ -541,7 +542,9 @@ even a logo, since images are blocked by default and a tracking pixel is not
 something a hospital system should normalise.
 
 `pnpm mail:preview` writes every template to HTML with sample data so you can
-look at them before anyone receives one; `pnpm mail:sink -- --out ./mail`
+look at them before anyone receives one, and with `--eml` also writes each as
+a complete MIME file — open one in a mail client and it renders exactly as a
+recipient would see it, which is a truer check than a browser; `pnpm mail:sink -- --out ./mail`
 saves what was actually delivered, HTML included.
 
 A template's wording lives in `notification_templates`; its structure —
